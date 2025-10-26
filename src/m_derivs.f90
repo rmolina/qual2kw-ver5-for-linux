@@ -27,6 +27,7 @@ module m_derivs
     use m_tempadjust, only: temp_adjust
     use m_upstream_boundary, only: upstream_boundary_t, instanteousheadwater
     use m_constants, only: nv, nl, adam, bdam, cpw, rhow
+    use wq_idx
     use m_sedcalcnew, only: sedcalcnumnew
     implicit none
     private
@@ -150,11 +151,12 @@ contains
         !scc add the following loop to calculate ph and save results 08/29/04
         do i=0, nr
 
-            call ph_solver(sys%imethph, ph, c(i, nv - 1, 1), te(i, 1), c(i, nv - 2, 1), c(i, 1, 1))
+            call ph_solver(sys%imethph, ph, c(i, IDX_TOTAL_INORGANIC_C, 1), te(i, 1), &
+                c(i, IDX_ALKALINITY, 1), c(i, IDX_CONDUCTIVITY, 1))
 
             phs(i, 1) = ph
             phs(i, 2) = 0 !not used unless hyporheic wq is simulated
-            call chemrates(te(i, 1), k1, k2, kw, kh, c(i, 1, 1))
+            call chemrates(te(i, 1), k1, k2, kw, kh, c(i, IDX_CONDUCTIVITY, 1))
             k1s(i, 1) = k1; k2s(i, 1) = k2; khs(i, 1) = kh
             k1s(i, 2) = 0; k2s(i, 2) = 0; khs(i, 2) = 0 !gp 02-nov-04 end of new block of code
         end do
@@ -237,8 +239,9 @@ contains
 
         do i = 1 , nr
             !'gp new sediment-water heat flux from sediments into the water in units of cal/cm2/day
-            jsed(i) = (te(i, 2) - te(i, 1)) * &
-                86400 * 2 * hydrau%reach(i)%sedthermcond / hydrau%reach(i)%hsedcm !'units of (cal/cm2/day), note that sedthermcond is in units of (cal/sec) per (cm deg c)
+            jsed(i) = (te(i, 2) - te(i, 1)) * 86400 * 2 * hydrau%reach(i)%sedthermcond / &
+                hydrau%reach(i)%hsedcm
+            !units of (cal/cm2/day), note that sedthermcond is in units of (cal/sec) per (cm deg c)
 
             !'gp 05-jul-05 save heat flux terms (cal/cm2/d) for each reach for this time step for output
             saveheatfluxjsed(i) = jsed(i)
@@ -343,7 +346,7 @@ contains
                         dam = 1.0_r64 / (1 + 0.116_r64 * adam * bdam * dropft * (1 - 0.034_r64 * dropft) * &
                             (1.0_r64 + 0.046_r64 * te(i - 1, 1)))
                         if (k == 3) then
-                            defa = os(i - 1, 1) - c(i - 1, 3, 1)
+                            defa = os(i - 1, 1) - c(i - 1, IDX_DISSOLVED_OXYGEN, 1)
                             defb = dam * defa
                             dc(i, k, 1) = hydrau%reach(i-1)%qcmd * (os(i-1, 1) - defb) !gp 27-oct-04 end new block
 
@@ -418,13 +421,15 @@ contains
 
                 !'gp 03-dec-09
                 !'fraction of total ammonia that is ionized ammonia nh4+ (fi)
-                kamm = 10.0_r64 ** (-(0.09018_r64 + 2729.92_r64 / (te(i, 1) + 273.15_r64))) !'equilibrium coeff for ammonia dissociation nh4+ = nh3(aq) + h+
+                kamm = 10.0_r64 ** (-(0.09018_r64 + 2729.92_r64 / (te(i, 1) + 273.15_r64)))
+                !equilibrium coeff for ammonia dissociation nh4+ = nh3(aq) + h+
                 fi = hh / (hh + kamm) !'fraction of ionized nh4+ = [nh4+ / (nh4+ + nh3)]
                 !'fraction of srp that is h2po4- (fpo41), hpo4-- (fpo42), and po4--- (fpo43)
                 kpo41 = 10.0_r64 ** (-2.15_r64) !'= [h+][h2po4-]/[h3po4] for eqn h3po4 = h+ + h2po4-
                 kpo42 = 10.0_r64 ** (-7.2_r64) !'= [h+][hpo4--]/[h2po4-] for eqn h2po4- = h+ + hpo4--
                 kpo43 = 10.0_r64 ** (-12.35_r64) !'= [h+][po4---]/[hpo4--] for eqn hpo4-- = h+ + po4---
-                dpo = 1.0_r64 / (hh ** 3.0_r64 + kpo41 * hh ** 2.0_r64 + kpo41 * kpo42 * hh + kpo41 * kpo42 * kpo43) !'intermediate calc of denominator
+                dpo = 1.0_r64 / (hh ** 3.0_r64 + kpo41 * hh ** 2.0_r64 + kpo41 * kpo42 * hh + kpo41 * kpo42 * kpo43)
+                !intermediate calc of denominator
                 fpo41 = kpo41 * hh ** 2.0_r64 * dpo !'fraction of phosphate as h2po4-
                 fpo42 = kpo41 * kpo42 * hh * dpo !'fraction of phosphate as hpo4--
                 fpo43 = kpo41 * kpo42 * kpo43 * dpo !'fraction of phosphate as po4---
@@ -437,24 +442,31 @@ contains
                 uw10 = (10.0_r64 / 7.0_r64) ** 0.15_r64 * meteo%uw(i) !'wind speed at 10 m (m/s)
                 kgnh3 = 175.287_r64 * uw10 + 262.9305_r64 !'nh3 mass transfer velocity (m/d)
                 henh3 = 0.0000136785_r64 * 1.052_r64 ** (te(i, 1) - 20.0_r64) !'henry's law constant for nh3 gas (atm m^3/mole)
-                vnh3 = k1nh3 * henh3 / (henh3 + 0.00008206_r64 * (te(i, 1) + 273.15_r64) * (k1nh3 / kgnh3)) !'nh3 gas transfer coefficient (m/d)
-                naus = 0.000000002_r64 / henh3 * 14000.0_r64 !'sat'n conc of nh3 assuming partial press of nh3 in atm = 2e-9 atm (values range from 1-10e-9 in rural and 10-100e-9 in heavily polluted areas)
-                nh3gas = vnh3 * hydrau%reach(i)%ast * (naus - (1.0_r64 - fi) * c(i, 7, 1)) !'loss or gain of nh3 via gas transfer (mgn/day)
+                vnh3 = k1nh3 * henh3 / (henh3 + 0.00008206_r64 * (te(i, 1) + 273.15_r64) &
+                    * (k1nh3 / kgnh3)) !'nh3 gas transfer coefficient (m/d)
+                naus = 0.000000002_r64 / henh3 * 14000.0_r64 !'sat'n conc of nh3 assuming partial press of nh3 in atm = 2e-9 atm
+                !values range from 1-10e-9 in rural and 10-100e-9 in heavily polluted areas
+                nh3gas = vnh3 * hydrau%reach(i)%ast * &
+                    (naus - (1.0_r64 - fi) * c(i, IDX_AMMONIA_N, 1)) !'loss or gain of nh3 via gas transfer (mgn/day)
 
                 !determine solar radiation
                 iat(i) = lightheat%par * solar%jsnt(i)
 
-                call oxygen_inhibition_and_enhancement(rates, c(i, 3, 1), fcarb, fnitr, fdenitr, frespp, frespb) !gp 27-oct-04
+                call oxygen_inhibition_and_enhancement(rates, &
+                    c(i, IDX_DISSOLVED_OXYGEN, 1), fcarb, fnitr, fdenitr, frespp, frespb) !gp 27-oct-04
 
                 !light extinction
 
                 !gp 13-feb-06 include macrophyte extinction if bottom plants are simulated as macrophytes
                 if ((hydrau%reach(i)%nupwcfrac < 1.0_r64) .or. (hydrau%reach(i)%pupwcfrac < 1.0_r64)) then
                     !include macrophyte biomass extinction if macrophytes are simulated
-                    ke= lightextinction(lightheat, c(i, 12, 1), c(i, 2, 1), c(i, 11, 1), c(i, nv, 1)/hydrau%reach(i)%depth)
+                    ke = lightextinction(lightheat, &
+                        c(i, IDX_PARTICULATE_ORG_MAT, 1), c(i, IDX_INORG_SUSP_SOLIDS, 1), c(i, IDX_PHYTOPLANKTON, 1), &
+                        c(i, IDX_BENTHIC_ALGAE, 1) / hydrau%reach(i)%depth)
                 else
                     !do not include macrophyte biomass extinction of periphyton are simulated
-                    ke= lightextinction(lightheat, c(i, 12, 1), c(i, 2, 1), c(i, 11, 1), 0.0_r64)
+                    ke = lightextinction(lightheat, c(i, IDX_PARTICULATE_ORG_MAT, 1), &
+                        c(i, IDX_INORG_SUSP_SOLIDS, 1), c(i, IDX_PHYTOPLANKTON, 1), 0.0_r64)
                 end if
 
                 !
@@ -464,27 +476,29 @@ contains
                 !nutrient limitation
 
                 !gp 09-dec-09 include fi
-                !if (hydrau%reach(i)%ksn + c(i, 7, 1) + c(i, 8, 1) <= 0) then
+                !if (hydrau%reach(i)%ksn + c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1) <= 0) then
                 ! phint = 0
                 !else
-                ! phint = (c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%ksn + c(i, 7, 1) + c(i, 8, 1))
+                ! phint = (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / (hydrau%reach(i)%ksn + c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1))
                 !end if
-                if (hydrau%reach(i)%ksn + fi * c(i, 7, 1) + c(i, 8, 1) <= 0) then
+                if (hydrau%reach(i)%ksn + fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1) <= 0) then
                     phint = 0
                 else
-                    phint = (fi * c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%ksn + fi * c(i, 7, 1) + c(i, 8, 1))
+                    phint = (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / &
+                        (hydrau%reach(i)%ksn + fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1))
                 end if
 
-                if ((hydrau%reach(i)%ksp + c(i, 10, 1)) <= 0) then
+                if ((hydrau%reach(i)%ksp + c(i, IDX_SOLUBLE_REACTIVE_P, 1)) <= 0) then
                     phip = 0
                 else
-                    phip = c(i, 10, 1) / (hydrau%reach(i)%ksp + c(i, 10, 1))
+                    phip = c(i, IDX_SOLUBLE_REACTIVE_P, 1) / (hydrau%reach(i)%ksp + c(i, IDX_SOLUBLE_REACTIVE_P, 1))
                 end if
                 if (phip < phint) phint = phip
                 if (rates%hco3use == "No") then
-                    phic = alp0 * c(i, nv-1, 1) / (rates%ksc + alp0 * c(i, nv-1, 1))
+                    phic = alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1) / (rates%ksc + alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1))
                 else
-                    phic = (alp0 + alp1) * c(i, nv-1, 1) / (rates%ksc + (alp0 + alp1) * c(i, nv-1, 1))
+                    phic = (alp0 + alp1) * c(i, IDX_TOTAL_INORGANIC_C, 1) / &
+                        (rates%ksc + (alp0 + alp1) * c(i, IDX_TOTAL_INORGANIC_C, 1))
                 end if
                 if (phic < phint) phint = phic
 
@@ -517,11 +531,12 @@ contains
                     end if
                 end select
 
-                phytophoto = phil * phint * kgat(i) * hydrau%reach(i)%vol * c(i, 11, 1) !mga/day
-                phytoresp = frespp * kreat(i) * hydrau%reach(i)%vol * c(i, 11, 1) !mga/day
-                phytodeath = kdeat(i) * hydrau%reach(i)%vol * c(i, 11, 1) !mga/day
-                phytosettl = hydrau%reach(i)%va * hydrau%reach(i)%asd * c(i, 11, 1) !mga/day
-                dc(i, 11, 1) = dc(i, 11, 1) + phytophoto - phytoresp - phytodeath - phytosettl !mga/day
+                phytophoto = phil * phint * kgat(i) * hydrau%reach(i)%vol * c(i, IDX_PHYTOPLANKTON, 1) !mga/day
+                phytoresp = frespp * kreat(i) * hydrau%reach(i)%vol * c(i, IDX_PHYTOPLANKTON, 1) !mga/day
+                phytodeath = kdeat(i) * hydrau%reach(i)%vol * c(i, IDX_PHYTOPLANKTON, 1) !mga/day
+                phytosettl = hydrau%reach(i)%va * hydrau%reach(i)%asd * c(i, IDX_PHYTOPLANKTON, 1) !mga/day
+                dc(i, IDX_PHYTOPLANKTON, 1) = dc(i, IDX_PHYTOPLANKTON, 1) + phytophoto &
+                    - phytoresp - phytodeath - phytosettl !mga/day
 
                 !
                 ! --- (16) bottom algae (gd/day) ---
@@ -529,9 +544,9 @@ contains
 
                 !luxury uptake calcs
 
-                if (c(i, nv, 1) > 0) then
-                    ninb = inb(i) / c(i, nv, 1)
-                    nipb = ipb(i) / c(i, nv, 1)
+                if (c(i, IDX_BENTHIC_ALGAE, 1) > 0) then
+                    ninb = inb(i) / c(i, IDX_BENTHIC_ALGAE, 1)
+                    nipb = ipb(i) / c(i, IDX_BENTHIC_ALGAE, 1)
                 else
                     ninb = rates%ana / rates%ada
                     nipb = rates%apa / rates%ada
@@ -558,9 +573,11 @@ contains
                 if (phip < phint) phint = phip
 
                 if (rates%hco3usef == "No") then
-                    phic = alp0 * c(i, nv-1, 1) / (rates%kscf + alp0 * c(i, nv-1, 1)) !gp !co2 is the limiting substrate
+                    phic = alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1) / &
+                        (rates%kscf + alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1)) !gp !co2 is the limiting substrate
                 else
-                    phic = (alp0 + alp1) * c(i, nv-1, 1) / (rates%kscf + (alp0 + alp1) * c(i, nv-1, 1)) !gp !hco3- is the limiting substrate
+                    phic = (alp0 + alp1) * c(i, IDX_TOTAL_INORGANIC_C, 1) / &
+                        (rates%kscf + (alp0 + alp1) * c(i, IDX_TOTAL_INORGANIC_C, 1)) !gp !hco3- is the limiting substrate
                 end if
                 phicsave(i) = phic !'gp 20-oct-04
                 if (phic < phint) phint = phic
@@ -625,89 +642,91 @@ contains
                 if (rates%typef == "Zero-order") then
                     botalgphoto = phil * phint * kgaft(i) * hydrau%reach(i)%asb !gd/day
                 else
-                    botalgphoto = phil * phint * kgaft(i) * hydrau%reach(i)%asb * c(i, nv, 1) &
-                        * (1 - c(i, nv, 1) / hydrau%reach(i)%abmax) !gd/day
+                    botalgphoto = phil * phint * kgaft(i) * hydrau%reach(i)%asb * &
+                        c(i, IDX_BENTHIC_ALGAE, 1) * (1 - c(i, IDX_BENTHIC_ALGAE, 1) / hydrau%reach(i)%abmax) !gd/day
                 end if
 
                 phitotalsave(i) = phil * phint * phitsave(i)
 
                 !basal resp
-                botalgresp = krea1ft(i) * hydrau%reach(i)%asb * c(i, nv, 1) !gd/day
+                botalgresp = krea1ft(i) * hydrau%reach(i)%asb * c(i, IDX_BENTHIC_ALGAE, 1) !gd/day
                 !add phot-resp
                 if (rates%typef == "Zero-order") then
                     botalgresp = botalgresp + krea2ft(i) * phil * phint * kgaft(i) * hydrau%reach(i)%asb
                 else !'else first-order growth used for photo resp
                     botalgresp = botalgresp + krea2ft(i) * phil * phint * kgaft(i) * hydrau%reach(i)%asb &
-                        * c(i, nv, 1) * (1 - c(i, nv, 1) / hydrau%reach(i)%abmax)
+                        * c(i, IDX_BENTHIC_ALGAE, 1) * (1 - c(i, IDX_BENTHIC_ALGAE, 1) / hydrau%reach(i)%abmax)
                 end if
                 !'adjust for oxygen attenuation
                 botalgresp = frespb * botalgresp !gd/day
 
-                botalgexc = kexaft(i) * hydrau%reach(i)%asb * c(i, nv, 1) !gd/day (note that botalgexc does not contribute to dc(i,nv,1)
-                botalgdeath = kdeaft(i) * hydrau%reach(i)%asb * c(i, nv, 1) !gd/day
-                dc(i, nv, 1) = botalgphoto - botalgresp - botalgdeath !gd/day
+                botalgexc = kexaft(i) * hydrau%reach(i)%asb * c(i, IDX_BENTHIC_ALGAE, 1) !gd/day
+                !note that botalgexc does not contribute to dc(i,IDX_BENTHIC_ALGAE,1)
+                botalgdeath = kdeaft(i) * hydrau%reach(i)%asb * c(i, IDX_BENTHIC_ALGAE, 1) !gd/day
+                dc(i, IDX_BENTHIC_ALGAE, 1) = botalgphoto - botalgresp - botalgdeath !gd/day
 
                 !gp 25-jun-09
                 savebotalgphoto(i) = botalgphoto / hydrau%reach(i)%asb
                 savebotalgresp(i) = botalgresp / hydrau%reach(i)%asb
                 savebotalgdeath(i) = botalgdeath / hydrau%reach(i)%asb
-                savebotalgnetgrowth(i) = dc(i, nv, 1) / hydrau%reach(i)%asb
+                savebotalgnetgrowth(i) = dc(i, IDX_BENTHIC_ALGAE, 1) / hydrau%reach(i)%asb
 
                 !periphyton uptake of n and p
 
                 !gp 03-dec-09
-                !if ((hydrau%reach(i)%ksnf + c(i, 7, 1) + c(i, 8, 1)) > 0) then
+                !if ((hydrau%reach(i)%ksnf + c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) > 0) then
                 ! nlim = hydrau%reach(i)%kqn / (hydrau%reach(i)%kqn + ninb - hydrau%reach(i)%ninbmin)
                 ! if (nlim < 0) then
                 ! nlim = 0
                 ! else if (nlim > 1.0) then
                 ! nlim = 1.0_r64
                 ! end if
-                ! botalguptaken = hydrau%reach(i)%asb * nlim * c(i, nv, 1) * hydrau%reach(i)%ninbupmax &
-                ! * (c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%ksnf + c(i, 7, 1) &
-                ! + c(i, 8, 1))
+                ! botalguptaken = hydrau%reach(i)%asb * nlim * c(i, IDX_BENTHIC_ALGAE, 1) * hydrau%reach(i)%ninbupmax &
+                ! * (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / (hydrau%reach(i)%ksnf + c(i, IDX_AMMONIA_N, 1) &
+                ! + c(i, IDX_NOX_N, 1))
                 !else
                 ! botalguptaken = 0
                 !end if
-                if ((hydrau%reach(i)%ksnf + fi * c(i, 7, 1) + c(i, 8, 1)) > 0) then
+                if ((hydrau%reach(i)%ksnf + fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) > 0) then
                     nlim = hydrau%reach(i)%kqn / (hydrau%reach(i)%kqn + ninb - hydrau%reach(i)%ninbmin)
                     if (nlim < 0) then
                         nlim = 0
                     else if (nlim > 1.0) then
                         nlim = 1.0_r64
                     end if
-                    botalguptaken = hydrau%reach(i)%asb * nlim * c(i, nv, 1) * hydrau%reach(i)%ninbupmax &
-                        * (fi * c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%ksnf + fi * c(i, 7, 1) &
-                        + c(i, 8, 1))
+                    botalguptaken = hydrau%reach(i)%asb * nlim * c(i, IDX_BENTHIC_ALGAE, 1) * &
+                        hydrau%reach(i)%ninbupmax * (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / &
+                        (hydrau%reach(i)%ksnf + fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1))
                 else
                     botalguptaken = 0
                 end if
 
-                if ((hydrau%reach(i)%kspf + c(i, 10, 1)) > 0) then
+                if ((hydrau%reach(i)%kspf + c(i, IDX_SOLUBLE_REACTIVE_P, 1)) > 0) then
                     plim = hydrau%reach(i)%kqp / (hydrau%reach(i)%kqp + nipb - hydrau%reach(i)%nipbmin)
                     if (plim < 0) then
                         plim = 0
                     else if (plim > 1) then
                         plim = 1.0_r64
                     end if
-                    botalguptakep = hydrau%reach(i)%asb * plim * c(i, nv, 1) * hydrau%reach(i)%nipbupmax &
-                        * c(i, 10, 1) / (hydrau%reach(i)%kspf + c(i, 10, 1))
+                    botalguptakep = hydrau%reach(i)%asb * plim * c(i, IDX_BENTHIC_ALGAE, 1) * &
+                        hydrau%reach(i)%nipbupmax * c(i, IDX_SOLUBLE_REACTIVE_P, 1) / &
+                        (hydrau%reach(i)%kspf + c(i, IDX_SOLUBLE_REACTIVE_P, 1))
                 else
                     botalguptakep = 0
                 end if
 
                 !gp 03-dec-09
-                !if (botalguptaken * sys%dt > (c(i, 7, 1) + c(i, 8, 1)) * hydrau%reach(i)%vol) then
-                ! botalguptaken = (c(i, 7, 1) + c(i, 8, 1)) * hydrau%reach(i)%vol / sys%dt !'mgn/day
+                !if (botalguptaken * sys%dt > (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) * hydrau%reach(i)%vol) then
+                ! botalguptaken = (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) * hydrau%reach(i)%vol / sys%dt !'mgn/day
                 !end if
-                !if (botalguptakep * sys%dt > c(i, 10, 1) * hydrau%reach(i)%vol) then
-                ! botalguptakep = c(i, 10, 1) * hydrau%reach(i)%vol / sys%dt !'mgp/day
+                !if (botalguptakep * sys%dt > c(i, IDX_SOLUBLE_REACTIVE_P, 1) * hydrau%reach(i)%vol) then
+                ! botalguptakep = c(i, IDX_SOLUBLE_REACTIVE_P, 1) * hydrau%reach(i)%vol / sys%dt !'mgp/day
                 !end if
-                if (botalguptaken * sys%dt > (fi * c(i, 7, 1) + c(i, 8, 1)) * hydrau%reach(i)%vol) then
-                    botalguptaken = (fi * c(i, 7, 1) + c(i, 8, 1)) * hydrau%reach(i)%vol / sys%dt !'mgn/day
+                if (botalguptaken * sys%dt > (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) * hydrau%reach(i)%vol) then
+                    botalguptaken = (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) * hydrau%reach(i)%vol / sys%dt !'mgn/day
                 end if
-                if (botalguptakep * sys%dt > c(i, 10, 1) * hydrau%reach(i)%vol) then
-                    botalguptakep = c(i, 10, 1) * hydrau%reach(i)%vol / sys%dt !'mgp/day
+                if (botalguptakep * sys%dt > c(i, IDX_SOLUBLE_REACTIVE_P, 1) * hydrau%reach(i)%vol) then
+                    botalguptakep = c(i, IDX_SOLUBLE_REACTIVE_P, 1) * hydrau%reach(i)%vol / sys%dt !'mgp/day
                 end if
 
                 !change in intracellular n and p in periphyton
@@ -718,59 +737,66 @@ contains
 
                 !gp 03-dec-09
                 !prefam = 0
-                !if (c(i, 7, 1) * c(i, 8, 1) > 0) then
-                ! prefam = c(i, 7, 1) * c(i, 8, 1) / (hydrau%reach(i)%khnx + c(i, 7, 1)) / (hydrau%reach(i)%khnx + c(i, 8, 1)) &
-                ! + c(i, 7, 1) * hydrau%reach(i)%khnx / (c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%khnx + c(i, 8, 1))
+                !if (c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) > 0) then
+                ! prefam = c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) / (hydrau%reach(i)%khnx + c(i, IDX_AMMONIA_N, 1)) / (hydrau%reach(i)%khnx + c(i, IDX_NOX_N, 1)) &
+                ! + c(i, IDX_AMMONIA_N, 1) * hydrau%reach(i)%khnx / (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / (hydrau%reach(i)%khnx + c(i, IDX_NOX_N, 1))
                 !end if
                 !prefamf = 0
-                !if (c(i, 7, 1) + c(i, 8, 1) > 0) then
-                ! prefamf = c(i, 7, 1) * c(i, 8, 1) / (hydrau%reach(i)%khnxf + c(i, 7, 1)) / (hydrau%reach(i)%khnxf + c(i, 8, 1)) &
-                ! + c(i, 7, 1) * hydrau%reach(i)%khnxf / (c(i, 7, 1) + c(i, 8, 1)) / (hydrau%reach(i)%khnxf + c(i, 8, 1))
+                !if (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1) > 0) then
+                ! prefamf = c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) / (hydrau%reach(i)%khnxf + c(i, IDX_AMMONIA_N, 1)) / (hydrau%reach(i)%khnxf + c(i, IDX_NOX_N, 1)) &
+                ! + c(i, IDX_AMMONIA_N, 1) * hydrau%reach(i)%khnxf / (c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / (hydrau%reach(i)%khnxf + c(i, IDX_NOX_N, 1))
                 !end if
                 prefam = 0
-                if (fi * c(i, 7, 1) * c(i, 8, 1) > 0) then
-                    prefam = fi * c(i, 7, 1) * c(i, 8, 1) / (hydrau%reach(i)%khnx + fi * c(i, 7, 1)) &
-                        / (hydrau%reach(i)%khnx + c(i, 8, 1)) &
-                        + fi * c(i, 7, 1) * hydrau%reach(i)%khnx / (fi * c(i, 7, 1) + c(i, 8, 1)) &
-                        / (hydrau%reach(i)%khnx + c(i, 8, 1))
+                if (fi * c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) > 0) then
+                    prefam = fi * c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) / &
+                        (hydrau%reach(i)%khnx + fi * c(i, IDX_AMMONIA_N, 1)) / &
+                        (hydrau%reach(i)%khnx + c(i, IDX_NOX_N, 1)) &
+                        + fi * c(i, IDX_AMMONIA_N, 1) * hydrau%reach(i)%khnx / &
+                        (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / &
+                        (hydrau%reach(i)%khnx + c(i, IDX_NOX_N, 1))
                 end if
                 prefamf = 0
-                if (fi * c(i, 7, 1) + c(i, 8, 1) > 0) then
-                    prefamf = fi * c(i, 7, 1) * c(i, 8, 1) / (hydrau%reach(i)%khnxf + fi * c(i, 7, 1)) &
-                        / (hydrau%reach(i)%khnxf + c(i, 8, 1)) &
-                        + fi * c(i, 7, 1) * hydrau%reach(i)%khnxf / (fi * c(i, 7, 1) + c(i, 8, 1)) &
-                        / (hydrau%reach(i)%khnxf + c(i, 8, 1))
+                if (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1) > 0) then
+                    prefamf = fi * c(i, IDX_AMMONIA_N, 1) * c(i, IDX_NOX_N, 1) / &
+                        (hydrau%reach(i)%khnxf + fi * c(i, IDX_AMMONIA_N, 1)) / &
+                        (hydrau%reach(i)%khnxf + c(i, IDX_NOX_N, 1)) &
+                        + fi * c(i, IDX_AMMONIA_N, 1) * hydrau%reach(i)%khnxf / &
+                        (fi * c(i, IDX_AMMONIA_N, 1) + c(i, IDX_NOX_N, 1)) / &
+                        (hydrau%reach(i)%khnxf + c(i, IDX_NOX_N, 1))
                 end if
 
                 !
                 ! --- sediment fluxes of o2, c, n, and p ---
                 !
 
-                if (sys%calcsedflux == "Yes" .or. sys%calcsedflux == "Option 1" .or. sys%calcsedflux == "Option 2") then !gp 11-jan-06
+                if (sys%calcsedflux == "Yes" .or. sys%calcsedflux == "Option 1" .or. &
+                    sys%calcsedflux == "Option 2") then !gp 11-jan-06
 
-                    Jcin = Rates%roc * Rates%aca * hydrau%reach(i)%va * c(i, 11, 1) &
-                        + hydrau%reach(i)%vdt * c(i, 12, 1) / Rates%adc * Rates%roc !gO2/m^2/d
-                    Jnin = (Rates%ana * hydrau%reach(i)%va * c(i, 11, 1) + hydrau%reach(i)%von * c(i, 6, 1)) / 1000.0_r64 !gN/m^2/d
-                    Jpin = (Rates%apa * hydrau%reach(i)%va * c(i, 11, 1) + hydrau%reach(i)%vop * c(i, 9, 1) &
-                        + hydrau%reach(i)%vip * c(i, 10, 1)) / 1000.0_r64 !gP/m^2/d
-                    ow = c(i, 3, 1) !mgO2/L = gO2/m^3
+                    Jcin = Rates%roc * Rates%aca * hydrau%reach(i)%va * c(i, IDX_PHYTOPLANKTON, 1) &
+                        + hydrau%reach(i)%vdt * c(i, IDX_PARTICULATE_ORG_MAT, 1) / Rates%adc * Rates%roc !gO2/m^2/d
+                    Jnin = (Rates%ana * hydrau%reach(i)%va * c(i, IDX_PHYTOPLANKTON, 1) + &
+                        hydrau%reach(i)%von * c(i, IDX_ORGANIC_N, 1)) / 1000.0_r64 !gN/m^2/d
+                    Jpin = (Rates%apa * hydrau%reach(i)%va * c(i, IDX_PHYTOPLANKTON, 1) + &
+                        hydrau%reach(i)%vop * c(i, IDX_ORGANIC_P, 1) + hydrau%reach(i)%vip * c(i, IDX_SOLUBLE_REACTIVE_P, 1)) / &
+                        1000.0_r64 !gP/m^2/d
+                    ow = c(i, IDX_DISSOLVED_OXYGEN, 1) !mgO2/L = gO2/m^3
 
                     !gp 09-Dec-09 include Fi
-                    !NH3w = c(i, 7, 1) / 1000.0_r64 !gN/m^3
-                    NH3w = Fi * c(i, 7, 1) / 1000.0_r64 !gN/m^3
+                    !NH3w = c(i, IDX_AMMONIA_N, 1) / 1000.0_r64 !gN/m^3
+                    NH3w = Fi * c(i, IDX_AMMONIA_N, 1) / 1000.0_r64 !gN/m^3
 
-                    NO3w = c(i, 8, 1) / 1000.0_r64 !gN/m^3
-                    PO4w = c(i, 10, 1) / 1000.0_r64 !gP/m^3
+                    NO3w = c(i, IDX_NOX_N, 1) / 1000.0_r64 !gN/m^3
+                    PO4w = c(i, IDX_SOLUBLE_REACTIVE_P, 1) / 1000.0_r64 !gP/m^3
                     Tw = Te(i, 1) !deg C
 
                     !note that inputs and outputs of O2, C(O2), N, and P fluxes to/from SedCalcNumNew are g/m^2/day
                     CALL SedCalcNumNew(Jcin, Jnin, Jpin, ow, hydrau%reach(i)%depth, Tw, SOD, Jamm, Jnitr, Jmeth, Jmethg, &
-                        Jphos, NH3w, NO3w, PO4w, c(i, 5, 1), CSOD, sys%calcSedFlux)
+                        Jphos, NH3w, NO3w, PO4w, c(i, IDX_CBOD_FAST, 1), CSOD, sys%calcSedFlux)
 
                     JNH4 = Jamm * 1000.0_r64 !mgN/m^2/d
                     JNO3 = Jnitr * 1000.0_r64 !mgN/m^2/d
                     JCH4 = Jmeth !gO2/m^2/d
-                    JPO4 = Jphos * 1000.0_r64 * Rates%kspi / (Rates%kspi + c(i, 3, 1)) !mgP/m^2/d
+                    JPO4 = Jphos * 1000.0_r64 * Rates%kspi / (Rates%kspi + c(i, IDX_DISSOLVED_OXYGEN, 1)) !mgP/m^2/d
                 END IF
 
                 SODpr(i) = hydrau%reach(i)%SODspec + SOD !gO2/m^2/d
@@ -792,110 +818,113 @@ contains
                 ! --- (12) detritus (gD/day) ---
                 !
 
-                DetrDiss = kdtT(i) * hydrau%reach(i)%vol * c(i, 12, 1)
-                DetrSettl = hydrau%reach(i)%vdt * hydrau%reach(i)%Asd * c(i, 12, 1)
-                dc(i, 12, 1) = dc(i, 12, 1) - DetrDiss
-                dc(i, 12, 1) = dc(i, 12, 1) - DetrSettl
-                dc(i, 12, 1) = dc(i, 12, 1) + Rates%ada * PhytoDeath
-                dc(i, 12, 1) = dc(i, 12, 1) + BotAlgDeath
+                DetrDiss = kdtT(i) * hydrau%reach(i)%vol * c(i, IDX_PARTICULATE_ORG_MAT, 1)
+                DetrSettl = hydrau%reach(i)%vdt * hydrau%reach(i)%Asd * c(i, IDX_PARTICULATE_ORG_MAT, 1)
+                dc(i, IDX_PARTICULATE_ORG_MAT, 1) = dc(i, IDX_PARTICULATE_ORG_MAT, 1) - DetrDiss
+                dc(i, IDX_PARTICULATE_ORG_MAT, 1) = dc(i, IDX_PARTICULATE_ORG_MAT, 1) - DetrSettl
+                dc(i, IDX_PARTICULATE_ORG_MAT, 1) = dc(i, IDX_PARTICULATE_ORG_MAT, 1) + Rates%ada * PhytoDeath
+                dc(i, IDX_PARTICULATE_ORG_MAT, 1) = dc(i, IDX_PARTICULATE_ORG_MAT, 1) + BotAlgDeath
 
                 !
                 ! --- (6) Organic Nitrogen (mgN/day) ---
                 !
 
-                OrgNHydr = khnT(i) * hydrau%reach(i)%vol * c(i, 6, 1)
-                OrgNSettl = hydrau%reach(i)%von * hydrau%reach(i)%Asd * c(i, 6, 1)
-                dc(i, 6, 1) = dc(i, 6, 1) + NINb * BotAlgDeath + Rates%ana * PhytoDeath
-                dc(i, 6, 1) = dc(i, 6, 1) - OrgNHydr - OrgNSettl
+                OrgNHydr = khnT(i) * hydrau%reach(i)%vol * c(i, IDX_ORGANIC_N, 1)
+                OrgNSettl = hydrau%reach(i)%von * hydrau%reach(i)%Asd * c(i, IDX_ORGANIC_N, 1)
+                dc(i, IDX_ORGANIC_N, 1) = dc(i, IDX_ORGANIC_N, 1) + NINb * BotAlgDeath + Rates%ana * PhytoDeath
+                dc(i, IDX_ORGANIC_N, 1) = dc(i, IDX_ORGANIC_N, 1) - OrgNHydr - OrgNSettl
 
                 !
                 ! --- (7) Total Ammonia (NH4+ + NH3) Nitrogen (mgN/day) ---
                 !
 
                 !gp 03-Dec-09
-                !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%vol * c(i, 7, 1)
-                NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%vol * Fi * c(i, 7, 1)
+                !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%vol * c(i, IDX_AMMONIA_N, 1)
+                NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%vol * Fi * c(i, IDX_AMMONIA_N, 1)
 
-                dc(i, 7, 1) = dc(i, 7, 1) + OrgNHydr
-                dc(i, 7, 1) = dc(i, 7, 1) - NH4Nitrif
-                dc(i, 7, 1) = dc(i, 7, 1) + Rates%ana * PhytoResp
-                dc(i, 7, 1) = dc(i, 7, 1) - prefam * Rates%ana * PhytoPhoto
-                dc(i, 7, 1) = dc(i, 7, 1) - prefamF * BotAlgUptakeN * hydrau%reach(i)%NUpWCfrac
-                dc(i, 7, 1) = dc(i, 7, 1) + JNH4pr(i) * hydrau%reach(i)%Asd
-                dc(i, 7, 1) = dc(i, 7, 1) + NINb * BotAlgExc
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) + OrgNHydr
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) - NH4Nitrif
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) + Rates%ana * PhytoResp
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) - prefam * Rates%ana * PhytoPhoto
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) - prefamF * BotAlgUptakeN * hydrau%reach(i)%NUpWCfrac
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) + JNH4pr(i) * hydrau%reach(i)%Asd
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) + NINb * BotAlgExc
 
                 !gp 03-Dec-09
-                dc(i, 7, 1) = dc(i, 7, 1) + NH3gas !air/water exchange of NH3 gas
+                dc(i, IDX_AMMONIA_N, 1) = dc(i, IDX_AMMONIA_N, 1) + NH3gas !air/water exchange of NH3 gas
 
                 !
                 ! --- (8) Nitrate+Nitrite Nitrogen (mgN/day) ---
                 !
 
-                Denitr = c(i, 5, 1) / (0.1_r64 + c(i, 5, 1)) * fdenitr * kiT(i) * hydrau%reach(i)%vol * c(i, 8, 1) !wc denitr
-                dc(i, 8, 1) = dc(i, 8, 1) + NH4Nitrif
-                dc(i, 8, 1) = dc(i, 8, 1) - Denitr
-                dc(i, 8, 1) = dc(i, 8, 1) - (1 - prefam) * Rates%ana * PhytoPhoto
-                dc(i, 8, 1) = dc(i, 8, 1) - (1 - prefamF) * BotAlgUptakeN * hydrau%reach(i)%NUpWCfrac
-                dc(i, 8, 1) = dc(i, 8, 1) + JNO3pr(i) * hydrau%reach(i)%Asd
-                dc(i, 8, 1) = dc(i, 8, 1) - vdiT(i) * hydrau%reach(i)%Asd * c(i, 8, 1) !sed denitr
+                Denitr = c(i, IDX_CBOD_FAST, 1) / (0.1_r64 + c(i, IDX_CBOD_FAST, 1)) * fdenitr * &
+                    kiT(i) * hydrau%reach(i)%vol * c(i, IDX_NOX_N, 1) !wc denitr
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) + NH4Nitrif
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) - Denitr
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) - (1 - prefam) * Rates%ana * PhytoPhoto
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) - (1 - prefamF) * BotAlgUptakeN * hydrau%reach(i)%NUpWCfrac
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) + JNO3pr(i) * hydrau%reach(i)%Asd
+                dc(i, IDX_NOX_N, 1) = dc(i, IDX_NOX_N, 1) - vdiT(i) * hydrau%reach(i)%Asd * c(i, IDX_NOX_N, 1) !sed denitr
 
                 !
                 ! --- (9) Organic Phosphorus (mgP/day) ---
                 !
 
-                OrgPHydr = khpT(i) * hydrau%reach(i)%vol * c(i, 9, 1)
-                OrgPSettl = hydrau%reach(i)%vop * hydrau%reach(i)%Asd * c(i, 9, 1)
-                dc(i, 9, 1) = dc(i, 9, 1) + NIPb * BotAlgDeath + Rates%apa * PhytoDeath
-                dc(i, 9, 1) = dc(i, 9, 1) - OrgPHydr - OrgPSettl
+                OrgPHydr = khpT(i) * hydrau%reach(i)%vol * c(i, IDX_ORGANIC_P, 1)
+                OrgPSettl = hydrau%reach(i)%vop * hydrau%reach(i)%Asd * c(i, IDX_ORGANIC_P, 1)
+                dc(i, IDX_ORGANIC_P, 1) = dc(i, IDX_ORGANIC_P, 1) + NIPb * BotAlgDeath + Rates%apa * PhytoDeath
+                dc(i, IDX_ORGANIC_P, 1) = dc(i, IDX_ORGANIC_P, 1) - OrgPHydr - OrgPSettl
 
                 !
                 ! --- (10) Inorganic Soluble Reactive Phosphorus (mgP/day) ---
                 !
 
-                dc(i, 10, 1) = dc(i, 10, 1) + OrgPHydr
-                dc(i, 10, 1) = dc(i, 10, 1) + Rates%apa * PhytoResp
-                dc(i, 10, 1) = dc(i, 10, 1) - Rates%apa * PhytoPhoto
-                dc(i, 10, 1) = dc(i, 10, 1) - BotAlgUptakeP * hydrau%reach(i)%PUpWCfrac
-                dc(i, 10, 1) = dc(i, 10, 1) + JSRPpr(i) * hydrau%reach(i)%Asd
-                InorgPSettl = hydrau%reach(i)%vip * hydrau%reach(i)%Asd * c(i, 10, 1)
-                dc(i, 10, 1) = dc(i, 10, 1) - InorgPSettl
-                dc(i, 10, 1) = dc(i, 10, 1) + NIPb * BotAlgExc
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) + OrgPHydr
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) + Rates%apa * PhytoResp
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) - Rates%apa * PhytoPhoto
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) - BotAlgUptakeP * hydrau%reach(i)%PUpWCfrac
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) + JSRPpr(i) * hydrau%reach(i)%Asd
+                InorgPSettl = hydrau%reach(i)%vip * hydrau%reach(i)%Asd * c(i, IDX_SOLUBLE_REACTIVE_P, 1)
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) - InorgPSettl
+                dc(i, IDX_SOLUBLE_REACTIVE_P, 1) = dc(i, IDX_SOLUBLE_REACTIVE_P, 1) + NIPb * BotAlgExc
 
                 !
                 ! --- (4) CBOD Slow (gO2/day) ---
                 !
 
-                CBODsHydr = khcT(i) * hydrau%reach(i)%vol * c(i, 4, 1)
-                dc(i, 4, 1) = dc(i, 4, 1) + Rates%roc * (1.0_r64 / Rates%adc) * DetrDiss
-                dc(i, 4, 1) = dc(i, 4, 1) - CBODsHydr
-                CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%vol * c(i,4, 1)
-                dc(i, 4, 1) = dc(i, 4, 1) - CBODsOxid
+                CBODsHydr = khcT(i) * hydrau%reach(i)%vol * c(i, IDX_CBOD_SLOW, 1)
+                dc(i, IDX_CBOD_SLOW, 1) = dc(i, IDX_CBOD_SLOW, 1) + Rates%roc * (1.0_r64 / Rates%adc) * DetrDiss
+                dc(i, IDX_CBOD_SLOW, 1) = dc(i, IDX_CBOD_SLOW, 1) - CBODsHydr
+                CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%vol * c(i,IDX_CBOD_SLOW, 1)
+                dc(i, IDX_CBOD_SLOW, 1) = dc(i, IDX_CBOD_SLOW, 1) - CBODsOxid
 
                 !
                 ! --- (5) CBOD Fast (gO2/day) ---
                 !
 
-                CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%vol * c(i, 5, 1)
-                dc(i, 5, 1) = dc(i, 5, 1) + CBODsHydr
-                dc(i, 5, 1) = dc(i, 5, 1) - CBODfOxid
-                dc(i, 5, 1) = dc(i, 5, 1) + JCH4pr(i) * hydrau%reach(i)%Asd
-                dc(i, 5, 1) = dc(i, 5, 1) - Rates%rondn * Denitr !gp end new block
+                CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%vol * c(i, IDX_CBOD_FAST, 1)
+                dc(i, IDX_CBOD_FAST, 1) = dc(i, IDX_CBOD_FAST, 1) + CBODsHydr
+                dc(i, IDX_CBOD_FAST, 1) = dc(i, IDX_CBOD_FAST, 1) - CBODfOxid
+                dc(i, IDX_CBOD_FAST, 1) = dc(i, IDX_CBOD_FAST, 1) + JCH4pr(i) * hydrau%reach(i)%Asd
+                dc(i, IDX_CBOD_FAST, 1) = dc(i, IDX_CBOD_FAST, 1) - Rates%rondn * Denitr !gp end new block
 
                 !
                 ! --- (2) Inorganic Suspended Solids (gD/day) ---
                 !
 
-                InorgSettl = hydrau%reach(i)%vss * hydrau%reach(i)%Asd * c(i, 2, 1)
-                dc(i, 2, 1) = dc(i, 2, 1) - InorgSettl !gp end new block
+                InorgSettl = hydrau%reach(i)%vss * hydrau%reach(i)%Asd * c(i, IDX_INORG_SUSP_SOLIDS, 1)
+                dc(i, IDX_INORG_SUSP_SOLIDS, 1) = dc(i, IDX_INORG_SUSP_SOLIDS, 1) - InorgSettl !gp end new block
 
                 !
                 ! --- (14) Generic constituent or COD (user defined units of mass/time, gO2/day if used as COD) ---
                 !
 
-                dc(i, 14, 1) = dc(i, 14, 1) - kgenT(i) * hydrau%reach(i)%vol * c(i, 14, 1)
-                dc(i, 14, 1) = dc(i, 14, 1) - hydrau%reach(i)%vgen * hydrau%reach(i)%Asd * c(i, 14, 1)
+                dc(i, IDX_GENERIC_CONST, 1) = dc(i, IDX_GENERIC_CONST, 1) - kgenT(i) * &
+                    hydrau%reach(i)%vol * c(i, IDX_GENERIC_CONST, 1)
+                dc(i, IDX_GENERIC_CONST, 1) = dc(i, IDX_GENERIC_CONST, 1) - hydrau%reach(i)%vgen * &
+                    hydrau%reach(i)%Asd * c(i, IDX_GENERIC_CONST, 1)
                 IF (Rates%useGenericAsCOD == "Yes") THEN
-                    CODoxid = kgenT(i) * hydrau%reach(i)%vol * c(i, 14, 1)
+                    CODoxid = kgenT(i) * hydrau%reach(i)%vol * c(i, IDX_GENERIC_CONST, 1)
                 ELSE
                     CODoxid = 0
                 END IF
@@ -904,18 +933,21 @@ contains
                 ! --- (3) Dissolved Oxygen (gO2/day) ---
                 !
 
-                OxReaer = kaT(i) * hydrau%reach(i)%vol * (oxygen_saturation(Te(i, 1), hydrau%reach(i)%elev) - c(i, 3, 1))
-                dc(i, 3, 1) = dc(i, 3, 1) + OxReaer
-                dc(i, 3, 1) = dc(i, 3, 1) - CBODsOxid - CBODfOxid
-                dc(i, 3, 1) = dc(i, 3, 1) - Rates%ron * NH4Nitrif
-                dc(i, 3, 1) = dc(i, 3, 1) - Rates%roa * PhytoResp
-                dc(i, 3, 1) = dc(i, 3, 1) + Rates%roa * PhytoPhoto * prefam
-                dc(i, 3, 1) = dc(i, 3, 1) + Rates%roa * PhytoPhoto * (1.0_r64 - prefam) * 138.0_r64 / 107.0_r64
-                dc(i, 3, 1) = dc(i, 3, 1) - Rates%roc / Rates%adc * BotAlgResp
-                dc(i, 3, 1) = dc(i, 3, 1) + Rates%roc / Rates%adc * BotAlgPhoto * prefamF
-                dc(i, 3, 1) = dc(i, 3, 1) + Rates%roc / Rates%adc * BotAlgPhoto * (1 - prefamF) * 138.0_r64 / 107.0_r64
-                dc(i, 3, 1) = dc(i, 3, 1) - SODpr(i) * hydrau%reach(i)%Asd
-                dc(i, 3, 1) = dc(i, 3, 1) - CODoxid
+                OxReaer = kaT(i) * hydrau%reach(i)%vol * &
+                    (oxygen_saturation(Te(i, 1), hydrau%reach(i)%elev) - c(i, IDX_DISSOLVED_OXYGEN, 1))
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) + OxReaer
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - CBODsOxid - CBODfOxid
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - Rates%ron * NH4Nitrif
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - Rates%roa * PhytoResp
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) + Rates%roa * PhytoPhoto * prefam
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) + &
+                    Rates%roa * PhytoPhoto * (1.0_r64 - prefam) * 138.0_r64 / 107.0_r64
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - Rates%roc / Rates%adc * BotAlgResp
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) + Rates%roc / Rates%adc * BotAlgPhoto * prefamF
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) + &
+                    Rates%roc / Rates%adc * BotAlgPhoto * (1 - prefamF) * 138.0_r64 / 107.0_r64
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - SODpr(i) * hydrau%reach(i)%Asd
+                dc(i, IDX_DISSOLVED_OXYGEN, 1) = dc(i, IDX_DISSOLVED_OXYGEN, 1) - CODoxid
 
                 !'gp 05-Jul-05 save DO fluxes (gO2/m^2/d)
                 saveDOfluxReaer(i) = OxReaer / hydrau%reach(i)%Ast
@@ -933,15 +965,15 @@ contains
                 saveDOfluxSOD(i) = -SODpr(i) * hydrau%reach(i)%Asd / hydrau%reach(i)%Ast
                 saveDOfluxCOD(i) = -CODoxid / hydrau%reach(i)%Ast
 
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) - Rates%rcca * PhytoPhoto
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + Rates%rcca * PhytoResp
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + Rates%rcco * CBODfOxid
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + Rates%rcco * CBODsOxid
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) - Rates%rccd * BotAlgPhoto
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + Rates%rccd * BotAlgResp
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + Rates%rcco * CSOD * hydrau%reach(i)%Asd
-                dc(i, nv - 1, 1) = dc(i, nv - 1, 1) + kacT(i) * hydrau%reach(i)%vol * (Khs(i, 1) &
-                    * Rates%pco2 - alp0 * c(i, nv - 1, 1)) !gp end new block
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) - Rates%rcca * PhytoPhoto
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + Rates%rcca * PhytoResp
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + Rates%rcco * CBODfOxid
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + Rates%rcco * CBODsOxid
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) - Rates%rccd * BotAlgPhoto
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + Rates%rccd * BotAlgResp
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + Rates%rcco * CSOD * hydrau%reach(i)%Asd
+                dc(i, IDX_TOTAL_INORGANIC_C, 1) = dc(i, IDX_TOTAL_INORGANIC_C, 1) + kacT(i) * hydrau%reach(i)%vol * (Khs(i, 1) &
+                    * Rates%pco2 - alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1)) !gp end new block
 
                 !
                 ! --- (nv-2) Alkalinity (gCaCO3/day) ---
@@ -950,50 +982,66 @@ contains
                 If (sys%simAlk == "Yes") Then
 
                     !gp 03-Dec-09
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkaa * PhytoPhoto * prefam * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkan * PhytoPhoto * (1.0_r64 - prefam) * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkaa * PhytoResp * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbn * BotAlgUptakeN * prefamF * 50000.0_r64 &
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkaa * PhytoPhoto * prefam * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkan * PhytoPhoto * (1.0_r64 - prefam) * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkaa * PhytoResp * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbn * BotAlgUptakeN * prefamF * 50000.0_r64 &
                     ! - Rates%ralkbp * BotAlgUptakeP * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * BotAlgUptakeN * (1.0_r64 - prefamF) * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkn * NH4Nitrif * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkden * Denitr * 50000.0_r64
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * OrgNHydr * 50000.0_r64 + Rates%ralkbp * OrgPHydr * 50000.0_r64 !gp end new block
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkn * JNH4pr(i) * hydrau%reach(i)%Asd * 50000.0_r64 !'sed flux of ammonia
-                    !dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbp * JSRPpr(i) * hydrau%reach(i)%Asd * 50000.0_r64 !'sed flux of PO4
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * BotAlgUptakeN * (1.0_r64 - prefamF) * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkn * NH4Nitrif * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkden * Denitr * 50000.0_r64
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * OrgNHydr * 50000.0_r64 + Rates%ralkbp * OrgPHydr * 50000.0_r64 !gp end new block
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkn * JNH4pr(i) * hydrau%reach(i)%Asd * 50000.0_r64 !'sed flux of ammonia
+                    !dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbp * JSRPpr(i) * hydrau%reach(i)%Asd * 50000.0_r64 !'sed flux of PO4
 
                     !gp 03-Dec-09
                     ! alkalinity derivative (factor of 50043.45 converts eqH+/L to mgCaCO3/L or gCaCO3/m^3)
                     ! Fi is already accounted for in nitrification, uptake
                     ! but not in the production of total ammonia (e.g. excretion, OrgN hydrolysis, JNH4pr)
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbn * Fi* Rates%ana * PhytoPhoto * prefam * 50043.45_r64 !'phyto photo uptake of ammonia
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Rates%ana * PhytoPhoto * (1 - prefam) * 50043.45_r64 !'phyto photo uptake of nitrate
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbp * Pcharge * Rates%apa * PhytoPhoto * 50043.45_r64 !'phyto photo uptake of P
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Fi * Rates%ana * PhytoResp * 50043.45_r64 !'phyto resp of N
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbp * Pcharge * Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbn * Fi * BotAlgUptakeN * prefamF &
-                        * hydrau%reach(i)%NUpWCfrac * 50043.45_r64 !'periphyton N uptake (ammonia)
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * BotAlgUptakeN * (1 - prefamF) &
-                        * hydrau%reach(i)%NUpWCfrac * 50043.45_r64 !'periphyton N uptake (nitrate)
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbp * Pcharge * BotAlgUptakeP &
-                        * hydrau%reach(i)%PUpWCfrac * 50043.45_r64 !'periphyton P uptake
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Fi * BotAlgExc * NINb * 50043.45_r64 !'periphyton excretion of N
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbp * Pcharge * BotAlgExc * NIPb * 50043.45_r64 !'periphyton excretion of P
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbn * 2.0_r64 * NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss and nitrate gain
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Denitr * 50043.45_r64 !'water column denitrification
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * vdiT(i) * hydrau%reach(i)%Asd * c(i, 8, 1) * 50043.45_r64 !'sediment denitrification
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Fi * OrgNHydr * 50043.45_r64 !'organic N hydrolysis
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbp * Pcharge * OrgPHydr * 50043.45_r64 !'organic P hydrolysis
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbn * Fi * JNH4pr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of ammonia
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbn * JNO3pr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of nitrate
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) - Rates%ralkbp * Pcharge * JSRPpr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of PO4
-                    dc(i, nv - 2, 1) = dc(i, nv - 2, 1) + Rates%ralkbp * Pcharge * InorgPSettl * 50043.45_r64 !'settling flux of PO4
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbn * Fi * Rates%ana * &
+                        PhytoPhoto * prefam * 50043.45_r64 !'phyto photo uptake of ammonia
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * Rates%ana * &
+                        PhytoPhoto * (1 - prefam) * 50043.45_r64 !'phyto photo uptake of nitrate
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbp * Pcharge * &
+                        Rates%apa * PhytoPhoto * 50043.45_r64 !'phyto photo uptake of P
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * Fi * Rates%ana * &
+                        PhytoResp * 50043.45_r64 !'phyto resp of N
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbp * Pcharge * &
+                        Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbn * Fi * &
+                        BotAlgUptakeN * prefamF * hydrau%reach(i)%NUpWCfrac * 50043.45_r64 !'periphyton N uptake (ammonia)
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * BotAlgUptakeN * &
+                        (1 - prefamF) * hydrau%reach(i)%NUpWCfrac * 50043.45_r64 !'periphyton N uptake (nitrate)
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbp * Pcharge * &
+                        BotAlgUptakeP * hydrau%reach(i)%PUpWCfrac * 50043.45_r64 !'periphyton P uptake
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * Fi * &
+                        BotAlgExc * NINb * 50043.45_r64 !'periphyton excretion of N
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbp * Pcharge * &
+                        BotAlgExc * NIPb * 50043.45_r64 !'periphyton excretion of P
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbn * 2.0_r64 * &
+                        NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss and nitrate gain
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * &
+                        Denitr * 50043.45_r64 !'water column denitrification
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * vdiT(i) * &
+                        hydrau%reach(i)%Asd * c(i, IDX_NOX_N, 1) * 50043.45_r64 !'sediment denitrification
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * Fi * &
+                        OrgNHydr * 50043.45_r64 !'organic N hydrolysis
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbp * Pcharge * &
+                        OrgPHydr * 50043.45_r64 !'organic P hydrolysis
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbn * Fi * &
+                        JNH4pr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of ammonia
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbn * &
+                        JNO3pr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of nitrate
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) - Rates%ralkbp * Pcharge * &
+                        JSRPpr(i) * hydrau%reach(i)%Asd * 50043.45_r64 !'sed flux of PO4
+                    dc(i, IDX_ALKALINITY, 1) = dc(i, IDX_ALKALINITY, 1) + Rates%ralkbp * Pcharge * &
+                        InorgPSettl * 50043.45_r64 !'settling flux of PO4
 
                 end if
 
                 !'gp 05-Jul-05 save CO2 fluxes (gC/m^2/d)
                 saveCO2fluxReaer(i) = (kacT(i) * hydrau%reach(i)%vol &
-                    * (Khs(i, 1) * Rates%pco2 - alp0 * c(i, nv - 1, 1))) &
+                    * (Khs(i, 1) * Rates%pco2 - alp0 * c(i, IDX_TOTAL_INORGANIC_C, 1))) &
                     / hydrau%reach(i)%Ast / Rates%rccc
                 saveCO2fluxCBODfast(i) = Rates%rcco * CBODfOxid / hydrau%reach(i)%Ast / Rates%rccc
                 saveCO2fluxCBODslow(i) = Rates%rcco * CBODsOxid / hydrau%reach(i)%Ast / Rates%rccc
@@ -1009,8 +1057,9 @@ contains
 
                 ksol = hydrau%reach(i)%apath * Solar%Jsnt(i) / 24.0_r64 &
                     * (1.0_r64 - EXP(-ke * hydrau%reach(i)%depth)) / (ke * hydrau%reach(i)%depth)
-                dc(i, 13, 1) = dc(i, 13, 1) - (kpathT(i) + ksol) * hydrau%reach(i)%vol * c(i, 13, 1)
-                dc(i, 13, 1) = dc(i, 13, 1) - hydrau%reach(i)%vpath * hydrau%reach(i)%Asd * c(i, 13, 1)
+                dc(i, IDX_PATHOGEN, 1) = dc(i, IDX_PATHOGEN, 1) - (kpathT(i) + ksol) * hydrau%reach(i)%vol * c(i, IDX_PATHOGEN, 1)
+                dc(i, IDX_PATHOGEN, 1) = dc(i, IDX_PATHOGEN, 1) - hydrau%reach(i)%vpath * &
+                    hydrau%reach(i)%Asd * c(i, IDX_PATHOGEN, 1)
 
             END DO
 
@@ -1046,10 +1095,11 @@ contains
 
                 DO i=0, nr
 
-                    call ph_solver(sys%imethph, ph, c(i, nv - 1, 2), Te(i, 2), c(i, nv - 2, 2), c(i, 1, 2))
+                    call ph_solver(sys%imethph, ph, c(i, IDX_TOTAL_INORGANIC_C, 2), Te(i, 2), &
+                        c(i, IDX_ALKALINITY, 2), c(i, IDX_CONDUCTIVITY, 2))
 
                     pHs(i, 2) = pH
-                    CALL ChemRates(Te(i, 2), K1, K2, KW, Kh, c(i, 1, 2))
+                    CALL ChemRates(Te(i, 2), K1, K2, KW, Kh, c(i, IDX_CONDUCTIVITY, 2))
                     K1s(i, 2) = K1; K2s(i, 2) = K2; Khs(i, 2) = Kh
                 END DO
 
@@ -1106,13 +1156,24 @@ contains
                         dc(i, k, 2) = hydrau%reach(i)%EhyporheicCMD * (c(i, k, 1) - c(i, k, 2))
                     END DO
                     !store hyporheic fluxes for output (positive flux is source to the water column from the hyporheic zone)
-                    HypoFluxDO(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 3, 2) - c(i, 3, 1)) / hydrau%reach(i)%Ast !DO gO2/m^2/d
-                    HypoFluxCBOD(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 5, 2) - c(i, 5, 1)) / hydrau%reach(i)%Ast !fast CBOD gO2/m^2/d
-                    HypoFluxNH4(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 7, 2) - c(i, 7, 1)) / hydrau%reach(i)%Ast !NH4 mgN/m^2/d
-                    HypoFluxNO3(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 8, 2) - c(i, 8, 1)) / hydrau%reach(i)%Ast !NO3 mgN/m^2/d
-                    HypoFluxSRP(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 10, 2) - c(i, 10, 1)) / hydrau%reach(i)%Ast !SRP mgP/m^2/d
-                    HypoFluxIC(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, nv - 1, 2) - c(i, nv - 1, 1)) &
-                        / hydrau%reach(i)%Ast / Rates%rccc !cT gC/m^2/d
+                    HypoFluxDO(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_DISSOLVED_OXYGEN, 2) - c(i, IDX_DISSOLVED_OXYGEN, 1)) / hydrau%reach(i)%Ast
+                    ! DO gO2/m^2/d
+                    HypoFluxCBOD(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_CBOD_FAST, 2) - c(i, IDX_CBOD_FAST, 1)) / hydrau%reach(i)%Ast
+                    ! fast CBOD gO2/m^2/d
+                    HypoFluxNH4(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_AMMONIA_N, 2) - c(i, IDX_AMMONIA_N, 1)) / hydrau%reach(i)%Ast
+                    ! NH4 mgN/m^2/d
+                    HypoFluxNO3(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_NOX_N, 2) - c(i, IDX_NOX_N, 1)) / hydrau%reach(i)%Ast
+                    ! NO3 mgN/m^2/d
+                    HypoFluxSRP(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_SOLUBLE_REACTIVE_P, 2) - c(i, IDX_SOLUBLE_REACTIVE_P, 1)) / hydrau%reach(i)%Ast
+                    ! SRP mgP/m^2/d
+                    HypoFluxIC(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_TOTAL_INORGANIC_C, 2) - c(i, IDX_TOTAL_INORGANIC_C, 1)) / &
+                        hydrau%reach(i)%Ast / Rates%rccc !cT gC/m^2/d
                 END DO
 
                 !
@@ -1146,83 +1207,84 @@ contains
 
                     SELECT CASE (Rates%IkoxC) !'low O2 inhibition of C oxidation by floating heterotrophs
                       CASE (1)
-                        fcarb = c(i, 3, 2) / (Rates%Ksocf + c(i, 3, 2))
+                        fcarb = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksocf + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fcarb = 1 - Exp(-Rates%Ksocf * c(i, 3, 2))
+                        fcarb = 1 - Exp(-Rates%Ksocf * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fcarb = c(i, 3, 2) ** 2 / (Rates%Ksocf + c(i, 3, 2) ** 2)
+                        fcarb = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksocf + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     !gp 08-Feb-06
                     !SELECT CASE (Rates%IkoxCH) !'low O2 inhibition of C oxidation by hyporheic biofilm heterotrophs
                     !CASE (1)
-                    ! fcarbH = c(i, 3, 2) / (Rates%kinhcH + c(i, 3, 2))
+                    ! fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2))
                     !CASE (2)
-                    ! fcarbH = 1 - Exp(-Rates%kinhcH * c(i, 3, 2))
+                    ! fcarbH = 1 - Exp(-Rates%kinhcH * c(i, IDX_DISSOLVED_OXYGEN, 2))
                     !CASE (3)
-                    ! fcarbH = c(i, 3, 2) ** 2 / (Rates%kinhcH + c(i, 3, 2) ** 2)
+                    ! fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     !END SELECT
                     SELECT CASE (Rates%IkoxCH) !'low O2 inhibition of C oxidation by hyporheic biofilm heterotrophs
                       CASE (1)
-                        fcarbH = c(i, 3, 2) / (hydrau%reach(i)%kinhcH + c(i, 3, 2))
+                        fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) / (hydrau%reach(i)%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fcarbH = 1 - Exp(-hydrau%reach(i)%kinhcH * c(i, 3, 2))
+                        fcarbH = 1 - Exp(-hydrau%reach(i)%kinhcH * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fcarbH = c(i, 3, 2) ** 2 / (hydrau%reach(i)%kinhcH + c(i, 3, 2) ** 2)
+                        fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / &
+                            (hydrau%reach(i)%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxN) !'low O2 inhibition of nitrification
                       CASE (1)
-                        fnitr = c(i, 3, 2) / (Rates%Ksona + c(i, 3, 2))
+                        fnitr = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksona + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fnitr = 1 - Exp(-Rates%Ksona * c(i, 3, 2))
+                        fnitr = 1 - Exp(-Rates%Ksona * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fnitr = c(i, 3, 2) ** 2 / (Rates%Ksona + c(i, 3, 2) ** 2)
+                        fnitr = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksona + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxDN) !'low O2 enhancement of denitrification
                       CASE (1)
-                        fdenitr = 1 - c(i, 3, 2) / (Rates%Ksodn + c(i, 3, 2))
+                        fdenitr = 1 - c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksodn + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fdenitr = Exp(-Rates%Ksodn * c(i, 3, 2))
+                        fdenitr = Exp(-Rates%Ksodn * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fdenitr = 1 - c(i, 3, 2) ** 2 / (Rates%Ksodn + c(i, 3, 2) ** 2)
+                        fdenitr = 1 - c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksodn + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxP) !'low O2 inhib of phytoplankton respiration
                       CASE (1)
-                        frespp = c(i, 3, 2) / (Rates%Ksop + c(i, 3, 2))
+                        frespp = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksop + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        frespp = 1 - Exp(-Rates%Ksop * c(i, 3, 2))
+                        frespp = 1 - Exp(-Rates%Ksop * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        frespp = c(i, 3, 2) ** 2 / (Rates%Ksop + c(i, 3, 2) ** 2)
+                        frespp = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksop + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     !'Phytoplankton (11)
-                    PhytoResp = frespp * kreaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 11, 2)
-                    PhytoDeath = kdeaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 11, 2)
-                    dc(i, 11, 2) = dc(i, 11, 2) - PhytoResp - PhytoDeath
+                    PhytoResp = frespp * kreaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PHYTOPLANKTON, 2)
+                    PhytoDeath = kdeaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PHYTOPLANKTON, 2)
+                    dc(i, IDX_PHYTOPLANKTON, 2) = dc(i, IDX_PHYTOPLANKTON, 2) - PhytoResp - PhytoDeath
 
                     !'Enhanced oxidation of fast C in the hyporheic sediment zone
-                    !'later versions of Q2K may use c(i, nv, 2) to represent biomass of the biofilm
+                    !'later versions of Q2K may use c(i, IDX_HYPORHEIC_BIOFILM, 2) to represent biomass of the biofilm
                     !'this current vesion of Q2K does not simulate the biofilm biomass as a state variable
                     !'limitation from fast DOC and dissolved oxygen:
 
                     !gp 08-Feb-06
                     !phint = 1
-                    !IF ((Rates%kscH + c(i, 5, 2)) <= 0) THEN
+                    !IF ((Rates%kscH + c(i, IDX_CBOD_FAST, 2)) <= 0) THEN
                     ! phic = 0
                     !ELSE
-                    ! phic = c(i, 5, 2) / (Rates%kscH + c(i, 5, 2))
+                    ! phic = c(i, IDX_CBOD_FAST, 2) / (Rates%kscH + c(i, IDX_CBOD_FAST, 2))
                     !END IF
                     !IF (phic < phint) THEN
                     ! phint = phic
                     !END IF
                     phint = 1
-                    IF ((hydrau%reach(i)%kscH + c(i, 5, 2)) <= 0) THEN
+                    IF ((hydrau%reach(i)%kscH + c(i, IDX_CBOD_FAST, 2)) <= 0) THEN
                         phic = 0
                     ELSE
-                        phic = c(i, 5, 2) / (hydrau%reach(i)%kscH + c(i, 5, 2))
+                        phic = c(i, IDX_CBOD_FAST, 2) / (hydrau%reach(i)%kscH + c(i, IDX_CBOD_FAST, 2))
                     END IF
                     IF (phic < phint) THEN
                         phint = phic
@@ -1237,100 +1299,111 @@ contains
                     !'to equivalent units of gD/d of net growth of heterotrophic bacteria biofilm
                     IF (Rates%typeH == "First-order") THEN
                         !'convert limited first-order d^-1 to gD/d of net growth
-                        HeteroGrow = (Rates%adc / Rates%roc) * phint * kgaHT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 5, 2)
+                        HeteroGrow = (Rates%adc / Rates%roc) * phint * kgaHT(i) * &
+                            hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_FAST, 2)
                     ELSE
                         !'convert limited zero-order gO2/m^2/d to gD/d of net growth
                         HeteroGrow = (Rates%adc / Rates%roc) * phint * kgaHT(i) * hydrau%reach(i)%Ast
                     END IF
 
                     !'detritus (12)
-                    DetrDiss = kdtT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 12, 2)
-                    dc(i, 12, 2) = dc(i, 12, 2) - DetrDiss
-                    dc(i, 12, 2) = dc(i, 12, 2) + Rates%ada * PhytoDeath
+                    DetrDiss = kdtT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PARTICULATE_ORG_MAT, 2)
+                    dc(i, IDX_PARTICULATE_ORG_MAT, 2) = dc(i, IDX_PARTICULATE_ORG_MAT, 2) - DetrDiss
+                    dc(i, IDX_PARTICULATE_ORG_MAT, 2) = dc(i, IDX_PARTICULATE_ORG_MAT, 2) + Rates%ada * PhytoDeath
 
                     !'Organic Nitrogen (6)
-                    OrgNHydr = khnT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 6, 2)
-                    dc(i, 6, 2) = dc(i, 6, 2) + Rates%ana * PhytoDeath
-                    dc(i, 6, 2) = dc(i, 6, 2) - OrgNHydr
+                    OrgNHydr = khnT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_ORGANIC_N, 2)
+                    dc(i, IDX_ORGANIC_N, 2) = dc(i, IDX_ORGANIC_N, 2) + Rates%ana * PhytoDeath
+                    dc(i, IDX_ORGANIC_N, 2) = dc(i, IDX_ORGANIC_N, 2) - OrgNHydr
 
                     !'Ammonium Nitrogen (7)
 
                     !gp 03-Dec-09
-                    !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 7, 2)
-                    NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * Fi * c(i, 7, 2)
+                    !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_AMMONIA_N, 2)
+                    NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * Fi * c(i, IDX_AMMONIA_N, 2)
 
-                    dc(i, 7, 2) = dc(i, 7, 2) + OrgNHydr
-                    dc(i, 7, 2) = dc(i, 7, 2) - NH4Nitrif
-                    dc(i, 7, 2) = dc(i, 7, 2) + Rates%ana * PhytoResp
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) + OrgNHydr
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) - NH4Nitrif
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) + Rates%ana * PhytoResp
 
                     !'Nitrate Nitrogen (8)
-                    Denitr = c(i, 5, 2) / (0.1 + c(i, 5, 2)) * fdenitr * kiT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 8, 2)
-                    dc(i, 8, 2) = dc(i, 8, 2) + NH4Nitrif
-                    dc(i, 8, 2) = dc(i, 8, 2) - Denitr
+                    Denitr = c(i, IDX_CBOD_FAST, 2) / (0.1 + c(i, IDX_CBOD_FAST, 2)) * fdenitr * &
+                        kiT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_NOX_N, 2)
+                    dc(i, IDX_NOX_N, 2) = dc(i, IDX_NOX_N, 2) + NH4Nitrif
+                    dc(i, IDX_NOX_N, 2) = dc(i, IDX_NOX_N, 2) - Denitr
 
                     !'Organic Phosphorus (9)
-                    OrgPHydr = khpT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 9, 2)
-                    dc(i, 9, 2) = dc(i, 9, 2) + Rates%apa * PhytoDeath
-                    dc(i, 9, 2) = dc(i, 9, 2) - OrgPHydr
+                    OrgPHydr = khpT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_ORGANIC_P, 2)
+                    dc(i, IDX_ORGANIC_P, 2) = dc(i, IDX_ORGANIC_P, 2) + Rates%apa * PhytoDeath
+                    dc(i, IDX_ORGANIC_P, 2) = dc(i, IDX_ORGANIC_P, 2) - OrgPHydr
 
                     !'Inorganic Phosphorus (10)
-                    dc(i, 10, 2) = dc(i, 10, 2) + OrgPHydr
-                    dc(i, 10, 2) = dc(i, 10, 2) + Rates%apa * PhytoResp
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) + OrgPHydr
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) + Rates%apa * PhytoResp
 
                     !'CBOD Slow (4)
-                    CBODsHydr = khcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 4, 2)
-                    dc(i, 4, 2) = dc(i, 4, 2) + Rates%roc * (1 / Rates%adc) * DetrDiss
-                    dc(i, 4, 2) = dc(i, 4, 2) - CBODsHydr
-                    CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 4, 2)
-                    dc(i, 4, 2) = dc(i, 4, 2) - CBODsOxid
+                    CBODsHydr = khcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_SLOW, 2)
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) + Rates%roc * (1 / Rates%adc) * DetrDiss
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) - CBODsHydr
+                    CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_SLOW, 2)
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) - CBODsOxid
 
                     !'CBOD Fast (5)
-                    CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 5, 2)
-                    CBODfOxid = CBODfOxid + Rates%roc * (1 / Rates%adc) * HeteroGrow !'enhanced CBOD oxidation from hyporheic biofilm growth
-                    dc(i, 5, 2) = dc(i, 5, 2) + CBODsHydr
-                    dc(i, 5, 2) = dc(i, 5, 2) - CBODfOxid
-                    dc(i, 5, 2) = dc(i, 5, 2) - Rates%rondn * Denitr
+                    CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_FAST, 2)
+                    CBODfOxid = CBODfOxid + Rates%roc * (1 / Rates%adc) * &
+                        HeteroGrow !'enhanced CBOD oxidation from hyporheic biofilm growth
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) + CBODsHydr
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) - CBODfOxid
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) - Rates%rondn * Denitr
 
                     !gp 08-Dec-04
                     !GENERIC CONSTITUENT or COD (14)
-                    dc(i, 14, 2) = dc(i, 14, 2) - kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 14, 2)
+                    dc(i, IDX_GENERIC_CONST, 2) = dc(i, IDX_GENERIC_CONST, 2) - kgenT(i) * &
+                        hydrau%reach(i)%HypoPoreVol * c(i, IDX_GENERIC_CONST, 2)
                     IF (Rates%useGenericAsCOD == "Yes") THEN
-                        CODoxid = kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 14, 2)
+                        CODoxid = kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_GENERIC_CONST, 2)
                     ELSE
                         CODoxid = 0
                     END IF
 
                     !'Dissolved Oxygen (3)
-                    dc(i, 3, 2) = dc(i, 3, 2) - CBODsOxid - CBODfOxid
-                    dc(i, 3, 2) = dc(i, 3, 2) - Rates%ron * NH4Nitrif
-                    dc(i, 3, 2) = dc(i, 3, 2) - Rates%roa * PhytoResp
-                    dc(i, 3, 2) = dc(i, 3, 2) - CODoxid !gp 08-Dec-04
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - CBODsOxid - CBODfOxid
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - Rates%ron * NH4Nitrif
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - Rates%roa * PhytoResp
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - CODoxid !gp 08-Dec-04
 
                     !'Alkalinity (nv - 2)
 
                     If (sys%simAlk == "Yes") Then !gp 26-Oct-07
 
                         !gp 03-Dec-09
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkaa * PhytoResp * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkn * NH4Nitrif * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkden * Denitr * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * OrgNHydr * 50000 + Rates%ralkbp * OrgPHydr * 50000
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Fi * Rates%ana * PhytoResp * 50043.45_r64 !'phyto resp of N
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbp * Pcharge * Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbn * 2.0_r64 * NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss (Fi) and nitrate gain (+1)
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Denitr * 50043.45_r64 !'denitrification
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Fi * OrgNHydr * 50043.45_r64 !'organic N hydrolysis
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbp * Pcharge * OrgPHydr * 50043.45_r64 !'organic P hydrolysis
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkaa * PhytoResp * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkn * NH4Nitrif * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkden * Denitr * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * OrgNHydr * 50000 + Rates%ralkbp * OrgPHydr * 50000
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Fi * &
+                            Rates%ana * PhytoResp * 50043.45_r64 !'phyto resp of N
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbp * Pcharge * &
+                            Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbn * 2.0_r64 * &
+                            NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss (Fi) and nitrate gain (+1)
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * &
+                            Denitr * 50043.45_r64 !'denitrification
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Fi * &
+                            OrgNHydr * 50043.45_r64 !'organic N hydrolysis
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbp * Pcharge * &
+                            OrgPHydr * 50043.45_r64 !'organic P hydrolysis
 
                     end if !gp 26-Oct-07
 
                     !'Inorganic Carbon (nv - 1)
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcca * PhytoResp
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcco * CBODfOxid
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcco * CBODsOxid
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcca * PhytoResp
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcco * CBODfOxid
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcco * CBODsOxid
 
                     !'PATHOGEN
-                    dc(i, 13, 2) = dc(i, 13, 2) - kpathT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 13, 2)
+                    dc(i, IDX_PATHOGEN, 2) = dc(i, IDX_PATHOGEN, 2) - kpathT(i) * &
+                        hydrau%reach(i)%HypoPoreVol * c(i, IDX_PATHOGEN, 2)
 
                 END DO
 
@@ -1365,9 +1438,10 @@ contains
                 !
 
                 DO i=0, nr
-                    call ph_solver(sys%imethph, ph, c(i, nv - 1, 2), Te(i, 2), c(i, nv - 2, 2), c(i, 1, 2))
+                    call ph_solver(sys%imethph, ph, c(i, IDX_TOTAL_INORGANIC_C, 2), Te(i, 2), &
+                        c(i, IDX_ALKALINITY, 2), c(i, IDX_CONDUCTIVITY, 2))
                     pHs(i, 2) = pH
-                    CALL ChemRates(Te(i, 2), K1, K2, KW, Kh, c(i, 1, 2))
+                    CALL ChemRates(Te(i, 2), K1, K2, KW, Kh, c(i, IDX_CONDUCTIVITY, 2))
                     K1s(i, 2) = K1; K2s(i, 2) = K2; Khs(i, 2) = Kh
                 END DO
 
@@ -1429,13 +1503,24 @@ contains
                         dc(i, k, 2) = hydrau%reach(i)%EhyporheicCMD * (c(i, k, 1) - c(i, k, 2))
                     END DO
                     !store hyporheic fluxes for output (positive flux is source to the water column from the hyporheic zone)
-                    HypoFluxDO(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 3, 2) - c(i, 3, 1)) / hydrau%reach(i)%Ast !DO gO2/m^2/d
-                    HypoFluxCBOD(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 5, 2) - c(i, 5, 1)) / hydrau%reach(i)%Ast !fast CBOD gO2/m^2/d
-                    HypoFluxNH4(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 7, 2) - c(i, 7, 1)) / hydrau%reach(i)%Ast !NH4 mgN/m^2/d
-                    HypoFluxNO3(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 8, 2) - c(i, 8, 1)) / hydrau%reach(i)%Ast !NO3 mgN/m^2/d
-                    HypoFluxSRP(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, 10, 2) - c(i, 10, 1)) / hydrau%reach(i)%Ast !SRP mgP/m^2/d
-                    HypoFluxIC(i) = hydrau%reach(i)%EhyporheicCMD * (c(i, nv - 1, 2) - c(i, nv - 1, 1)) &
-                        / hydrau%reach(i)%Ast / Rates%rccc !cT gC/m^2/d
+                    HypoFluxDO(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_DISSOLVED_OXYGEN, 2) - c(i, IDX_DISSOLVED_OXYGEN, 1)) / hydrau%reach(i)%Ast
+                    ! DO gO2/m^2/d
+                    HypoFluxCBOD(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_CBOD_FAST, 2) - c(i, IDX_CBOD_FAST, 1)) / hydrau%reach(i)%Ast
+                    ! fast CBOD gO2/m^2/d
+                    HypoFluxNH4(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_AMMONIA_N, 2) - c(i, IDX_AMMONIA_N, 1)) / hydrau%reach(i)%Ast
+                    ! NH4 mgN/m^2/d
+                    HypoFluxNO3(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_NOX_N, 2) - c(i, IDX_NOX_N, 1)) / hydrau%reach(i)%Ast
+                    ! NO3 mgN/m^2/d
+                    HypoFluxSRP(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_SOLUBLE_REACTIVE_P, 2) - c(i, IDX_SOLUBLE_REACTIVE_P, 1)) / hydrau%reach(i)%Ast
+                    ! SRP mgP/m^2/d
+                    HypoFluxIC(i) = hydrau%reach(i)%EhyporheicCMD * &
+                        (c(i, IDX_TOTAL_INORGANIC_C, 2) - c(i, IDX_TOTAL_INORGANIC_C, 1)) / &
+                        hydrau%reach(i)%Ast / Rates%rccc !cT gC/m^2/d
                 END DO
 
                 !
@@ -1468,97 +1553,99 @@ contains
 
                     SELECT CASE (Rates%IkoxC) !'low O2 inhibition of C oxidation by floating heterotrophs
                       CASE (1)
-                        fcarb = c(i, 3, 2) / (Rates%Ksocf + c(i, 3, 2))
+                        fcarb = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksocf + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fcarb = 1 - Exp(-Rates%Ksocf * c(i, 3, 2))
+                        fcarb = 1 - Exp(-Rates%Ksocf * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fcarb = c(i, 3, 2) ** 2 / (Rates%Ksocf + c(i, 3, 2) ** 2)
+                        fcarb = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksocf + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     !gp 08-Feb-06
                     !SELECT CASE (Rates%IkoxCH) !'low O2 inhibition of C oxidation by hyporheic biofilm heterotrophs
                     !CASE (1)
-                    ! fcarbH = c(i, 3, 2) / (Rates%kinhcH + c(i, 3, 2))
+                    ! fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2))
                     !CASE (2)
-                    ! fcarbH = 1 - Exp(-Rates%kinhcH * c(i, 3, 2))
+                    ! fcarbH = 1 - Exp(-Rates%kinhcH * c(i, IDX_DISSOLVED_OXYGEN, 2))
                     !CASE (3)
-                    ! fcarbH = c(i, 3, 2) ** 2 / (Rates%kinhcH + c(i, 3, 2) ** 2)
+                    ! fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     !END SELECT
                     SELECT CASE (Rates%IkoxCH) !'low O2 inhibition of C oxidation by hyporheic biofilm heterotrophs
                       CASE (1)
-                        fcarbH = c(i, 3, 2) / (hydrau%reach(i)%kinhcH + c(i, 3, 2))
+                        fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) / (hydrau%reach(i)%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fcarbH = 1 - Exp(-hydrau%reach(i)%kinhcH * c(i, 3, 2))
+                        fcarbH = 1 - Exp(-hydrau%reach(i)%kinhcH * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fcarbH = c(i, 3, 2) ** 2 / (hydrau%reach(i)%kinhcH + c(i, 3, 2) ** 2)
+                        fcarbH = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / &
+                            (hydrau%reach(i)%kinhcH + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxN) !'low O2 inhibition of nitrification
                       CASE (1)
-                        fnitr = c(i, 3, 2) / (Rates%Ksona + c(i, 3, 2))
+                        fnitr = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksona + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fnitr = 1 - Exp(-Rates%Ksona * c(i, 3, 2))
+                        fnitr = 1 - Exp(-Rates%Ksona * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fnitr = c(i, 3, 2) ** 2 / (Rates%Ksona + c(i, 3, 2) ** 2)
+                        fnitr = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksona + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxDN) !'low O2 enhancement of denitrification
                       CASE (1)
-                        fdenitr = 1 - c(i, 3, 2) / (Rates%Ksodn + c(i, 3, 2))
+                        fdenitr = 1 - c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksodn + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        fdenitr = Exp(-Rates%Ksodn * c(i, 3, 2))
+                        fdenitr = Exp(-Rates%Ksodn * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        fdenitr = 1 - c(i, 3, 2) ** 2 / (Rates%Ksodn + c(i, 3, 2) ** 2)
+                        fdenitr = 1 - c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksodn + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     SELECT CASE (Rates%IkoxP) !'low O2 inhib of phytoplankton respiration
                       CASE (1)
-                        frespp = c(i, 3, 2) / (Rates%Ksop + c(i, 3, 2))
+                        frespp = c(i, IDX_DISSOLVED_OXYGEN, 2) / (Rates%Ksop + c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (2)
-                        frespp = 1 - Exp(-Rates%Ksop * c(i, 3, 2))
+                        frespp = 1 - Exp(-Rates%Ksop * c(i, IDX_DISSOLVED_OXYGEN, 2))
                       CASE (3)
-                        frespp = c(i, 3, 2) ** 2 / (Rates%Ksop + c(i, 3, 2) ** 2)
+                        frespp = c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2 / (Rates%Ksop + c(i, IDX_DISSOLVED_OXYGEN, 2) ** 2)
                     END SELECT
 
                     !'Phytoplankton (11)
-                    PhytoResp = frespp * kreaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 11, 2)
-                    PhytoDeath = kdeaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 11, 2)
-                    dc(i, 11, 2) = dc(i, 11, 2) - PhytoResp - PhytoDeath
+                    PhytoResp = frespp * kreaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PHYTOPLANKTON, 2)
+                    PhytoDeath = kdeaT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PHYTOPLANKTON, 2)
+                    dc(i, IDX_PHYTOPLANKTON, 2) = dc(i, IDX_PHYTOPLANKTON, 2) - PhytoResp - PhytoDeath
 
                     !gp 15-Nov-04
                     !Attached heterotrophic bacteria (nv)
                     !nutrient limitation
 
                     !gp 03-Dec-09
-                    !If (hydrau%reach(i)%ksnH + c(i, 7, 2) + c(i, 8, 2) <= 0) Then
+                    !If (hydrau%reach(i)%ksnH + c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2) <= 0) Then
                     ! phint = 0
                     !Else
-                    ! phint = (c(i, 7, 2) + c(i, 8, 2)) / (hydrau%reach(i)%ksnH + c(i, 7, 2) + c(i, 8, 2))
+                    ! phint = (c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2)) / (hydrau%reach(i)%ksnH + c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2))
                     !End If
-                    !If (hydrau%reach(i)%kspH + c(i, 10, 2) <= 0) Then
+                    !If (hydrau%reach(i)%kspH + c(i, IDX_SOLUBLE_REACTIVE_P, 2) <= 0) Then
                     ! phip = 0
                     !Else
-                    ! phip = c(i, 10, 2) / (hydrau%reach(i)%kspH + c(i, 10, 2))
+                    ! phip = c(i, IDX_SOLUBLE_REACTIVE_P, 2) / (hydrau%reach(i)%kspH + c(i, IDX_SOLUBLE_REACTIVE_P, 2))
                     !End If
                     !If (phip < phint) phint = phip
-                    If (hydrau%reach(i)%ksnH + Fi * c(i, 7, 2) + c(i, 8, 2) <= 0) Then
+                    If (hydrau%reach(i)%ksnH + Fi * c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2) <= 0) Then
                         phint = 0
                     Else
-                        phint = (Fi * c(i, 7, 2) + c(i, 8, 2)) / (hydrau%reach(i)%ksnH + Fi * c(i, 7, 2) + c(i, 8, 2))
+                        phint = (Fi * c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2)) / &
+                            (hydrau%reach(i)%ksnH + Fi * c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2))
                     End If
-                    If (hydrau%reach(i)%kspH + c(i, 10, 2) <= 0) Then
+                    If (hydrau%reach(i)%kspH + c(i, IDX_SOLUBLE_REACTIVE_P, 2) <= 0) Then
                         phip = 0
                     Else
-                        phip = c(i, 10, 2) / (hydrau%reach(i)%kspH + c(i, 10, 2))
+                        phip = c(i, IDX_SOLUBLE_REACTIVE_P, 2) / (hydrau%reach(i)%kspH + c(i, IDX_SOLUBLE_REACTIVE_P, 2))
                     End If
                     If (phip < phint) phint = phip
 
                     !limitation of enhanced oxidation of fast DOC from fast DOC
 
-                    If (hydrau%reach(i)%kscH + c(i, 5, 2) <= 0) Then
+                    If (hydrau%reach(i)%kscH + c(i, IDX_CBOD_FAST, 2) <= 0) Then
                         phic = 0
                     Else
-                        phic = c(i, 5, 2) / (hydrau%reach(i)%kscH + c(i, 5, 2))
+                        phic = c(i, IDX_CBOD_FAST, 2) / (hydrau%reach(i)%kscH + c(i, IDX_CBOD_FAST, 2))
                     End If
 
                     If (phic < phint) phint = phic
@@ -1568,144 +1655,163 @@ contains
                     If (Rates%typeH == "First-order") Then
 
                         !gp 08-Feb-06
-                        !HeteroGrow = phint * kgaHT(i) * hydrau%reach(i)%Ast * c(i, nv, 2) * (1 - c(i, nv, 2) / Rates%ahmax) !use first-order growth kinetics
-                        HeteroGrow = phint * kgaHT(i) * hydrau%reach(i)%Ast * c(i, nv, 2) &
-                            * (1 - c(i, nv, 2) / hydrau%reach(i)%ahmax) !use first-order growth kinetics
+                        !HeteroGrow = phint * kgaHT(i) * hydrau%reach(i)%Ast * c(i, IDX_HYPORHEIC_BIOFILM, 2) * (1 - c(i, IDX_HYPORHEIC_BIOFILM, 2) / Rates%ahmax) !use first-order growth kinetics
+                        HeteroGrow = phint * kgaHT(i) * hydrau%reach(i)%Ast * c(i, IDX_HYPORHEIC_BIOFILM, 2) &
+                            * (1 - c(i, IDX_HYPORHEIC_BIOFILM, 2) / hydrau%reach(i)%ahmax) !use first-order growth kinetics
 
                     Else
-                        HeteroGrow = (Rates%adc / Rates%roc) * phint * kgaHT(i) * hydrau%reach(i)%Ast !use zero-order, kgaH is gO2/m2/d
+                        HeteroGrow = (Rates%adc / Rates%roc) * phint * kgaHT(i) * &
+                            hydrau%reach(i)%Ast !use zero-order, kgaH is gO2/m2/d
                     End If
-                    HeteroResp = fcarbH * kreaHT(i) * hydrau%reach(i)%Ast * c(i, nv, 2) !first-order respiration with O2 limitation
-                    HeteroDeath = kdeaHT(i) * hydrau%reach(i)%Ast * c(i, nv, 2) !first-order death
-                    dc(i, nv, 2) = HeteroGrow - HeteroResp - HeteroDeath !units gD/d deriv for biofilm biomass
+                    HeteroResp = fcarbH * kreaHT(i) * hydrau%reach(i)%Ast * &
+                        c(i, IDX_HYPORHEIC_BIOFILM, 2) !first-order respiration with O2 limitation
+                    HeteroDeath = kdeaHT(i) * hydrau%reach(i)%Ast * c(i, IDX_HYPORHEIC_BIOFILM, 2) !first-order death
+                    dc(i, IDX_HYPORHEIC_BIOFILM, 2) = HeteroGrow - HeteroResp - HeteroDeath !units gD/d deriv for biofilm biomass
 
                     !ammonium preference
 
                     !gp 03-Dec-09
                     !prefamH = 0
-                    !If (c(i, 7, 2) + c(i, 8, 2) > 0) Then
-                    ! prefamH = c(i, 7, 2) * c(i, 8, 2) / (hydrau%reach(i)%khnxH + c(i, 7, 2)) / (hydrau%reach(i)%khnxH + c(i, 8, 2)) &
-                    ! + c(i, 7, 2) * hydrau%reach(i)%khnxH / (c(i, 7, 2) + c(i, 8, 2)) / (hydrau%reach(i)%khnxH + c(i, 8, 2))
+                    !If (c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2) > 0) Then
+                    ! prefamH = c(i, IDX_AMMONIA_N, 2) * c(i, IDX_NOX_N, 2) / (hydrau%reach(i)%khnxH + c(i, IDX_AMMONIA_N, 2)) / (hydrau%reach(i)%khnxH + c(i, IDX_NOX_N, 2)) &
+                    ! + c(i, IDX_AMMONIA_N, 2) * hydrau%reach(i)%khnxH / (c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2)) / (hydrau%reach(i)%khnxH + c(i, IDX_NOX_N, 2))
                     !End If
                     prefamH = 0
-                    If (Fi * c(i, 7, 2) + c(i, 8, 2) > 0) Then
-                        prefamH = Fi * c(i, 7, 2) * c(i, 8, 2) / (hydrau%reach(i)%khnxH + Fi * c(i, 7, 2)) &
-                            / (hydrau%reach(i)%khnxH + c(i, 8, 2)) &
-                            + Fi * c(i, 7, 2) * hydrau%reach(i)%khnxH / (Fi * c(i, 7, 2) + c(i, 8, 2)) &
-                            / (hydrau%reach(i)%khnxH + c(i, 8, 2))
+                    If (Fi * c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2) > 0) Then
+                        prefamH = Fi * c(i, IDX_AMMONIA_N, 2) * c(i, IDX_NOX_N, 2) / &
+                            (hydrau%reach(i)%khnxH + Fi * c(i, IDX_AMMONIA_N, 2)) / &
+                            (hydrau%reach(i)%khnxH + c(i, IDX_NOX_N, 2)) &
+                            + Fi * c(i, IDX_AMMONIA_N, 2) * hydrau%reach(i)%khnxH / &
+                            (Fi * c(i, IDX_AMMONIA_N, 2) + c(i, IDX_NOX_N, 2)) / &
+                            (hydrau%reach(i)%khnxH + c(i, IDX_NOX_N, 2))
                     End If
 
                     !'detritus (12)
-                    DetrDiss = kdtT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 12, 2)
-                    dc(i, 12, 2) = dc(i, 12, 2) - DetrDiss
-                    dc(i, 12, 2) = dc(i, 12, 2) + Rates%ada * PhytoDeath
-                    dc(i, 12, 2) = dc(i, 12, 2) + HeteroDeath !gp 22-Nov-04
+                    DetrDiss = kdtT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_PARTICULATE_ORG_MAT, 2)
+                    dc(i, IDX_PARTICULATE_ORG_MAT, 2) = dc(i, IDX_PARTICULATE_ORG_MAT, 2) - DetrDiss
+                    dc(i, IDX_PARTICULATE_ORG_MAT, 2) = dc(i, IDX_PARTICULATE_ORG_MAT, 2) + Rates%ada * PhytoDeath
+                    dc(i, IDX_PARTICULATE_ORG_MAT, 2) = dc(i, IDX_PARTICULATE_ORG_MAT, 2) + HeteroDeath !gp 22-Nov-04
 
                     !'Organic Nitrogen (6)
-                    OrgNHydr = khnT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 6, 2)
-                    dc(i, 6, 2) = dc(i, 6, 2) + Rates%ana * PhytoDeath
-                    dc(i, 6, 2) = dc(i, 6, 2) - OrgNHydr
-                    dc(i, 6, 2) = dc(i, 6, 2) + HeteroDeath * Rates%ana / Rates%ada !gp 15-Nov-04
+                    OrgNHydr = khnT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_ORGANIC_N, 2)
+                    dc(i, IDX_ORGANIC_N, 2) = dc(i, IDX_ORGANIC_N, 2) + Rates%ana * PhytoDeath
+                    dc(i, IDX_ORGANIC_N, 2) = dc(i, IDX_ORGANIC_N, 2) - OrgNHydr
+                    dc(i, IDX_ORGANIC_N, 2) = dc(i, IDX_ORGANIC_N, 2) + HeteroDeath * Rates%ana / Rates%ada !gp 15-Nov-04
 
                     !'Ammonium Nitrogen (7)
 
                     !gp 03-Dec-09
-                    !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 7, 2)
-                    NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * Fi * c(i, 7, 2)
+                    !NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_AMMONIA_N, 2)
+                    NH4Nitrif = fnitr * knT(i) * hydrau%reach(i)%HypoPoreVol * Fi * c(i, IDX_AMMONIA_N, 2)
 
-                    dc(i, 7, 2) = dc(i, 7, 2) + OrgNHydr
-                    dc(i, 7, 2) = dc(i, 7, 2) - NH4Nitrif
-                    dc(i, 7, 2) = dc(i, 7, 2) + Rates%ana * PhytoResp
-                    dc(i, 7, 2) = dc(i, 7, 2) + Rates%anc / Rates%adc * HeteroResp !gp 15-Nov-04
-                    dc(i, 7, 2) = dc(i, 7, 2) - Rates%anc / Rates%adc * prefamH * HeteroGrow !gp 15-Nov-04
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) + OrgNHydr
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) - NH4Nitrif
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) + Rates%ana * PhytoResp
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) + Rates%anc / Rates%adc * HeteroResp !gp 15-Nov-04
+                    dc(i, IDX_AMMONIA_N, 2) = dc(i, IDX_AMMONIA_N, 2) - Rates%anc / Rates%adc * prefamH * HeteroGrow !gp 15-Nov-04
 
                     !'Nitrate Nitrogen (8)
-                    Denitr = c(i, 5, 2) / (0.1 + c(i, 5, 2)) * fdenitr * kiT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 8, 2)
-                    dc(i, 8, 2) = dc(i, 8, 2) + NH4Nitrif
-                    dc(i, 8, 2) = dc(i, 8, 2) - Denitr
-                    dc(i, 8, 2) = dc(i, 8, 2) - Rates%anc / Rates%adc * (1 - prefamH) * HeteroGrow !gp 15-Nov-04
+                    Denitr = c(i, IDX_CBOD_FAST, 2) / (0.1 + c(i, IDX_CBOD_FAST, 2)) * fdenitr * &
+                        kiT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_NOX_N, 2)
+                    dc(i, IDX_NOX_N, 2) = dc(i, IDX_NOX_N, 2) + NH4Nitrif
+                    dc(i, IDX_NOX_N, 2) = dc(i, IDX_NOX_N, 2) - Denitr
+                    dc(i, IDX_NOX_N, 2) = dc(i, IDX_NOX_N, 2) - Rates%anc / Rates%adc * (1 - prefamH) * HeteroGrow !gp 15-Nov-04
 
                     !'Organic Phosphorus (9)
-                    OrgPHydr = khpT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 9, 2)
-                    dc(i, 9, 2) = dc(i, 9, 2) + Rates%apa * PhytoDeath
-                    dc(i, 9, 2) = dc(i, 9, 2) - OrgPHydr
-                    dc(i, 9, 2) = dc(i, 9, 2) + HeteroDeath * Rates%apa / Rates%ada !gp 15-Nov-04
+                    OrgPHydr = khpT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_ORGANIC_P, 2)
+                    dc(i, IDX_ORGANIC_P, 2) = dc(i, IDX_ORGANIC_P, 2) + Rates%apa * PhytoDeath
+                    dc(i, IDX_ORGANIC_P, 2) = dc(i, IDX_ORGANIC_P, 2) - OrgPHydr
+                    dc(i, IDX_ORGANIC_P, 2) = dc(i, IDX_ORGANIC_P, 2) + HeteroDeath * Rates%apa / Rates%ada !gp 15-Nov-04
 
                     !'Inorganic Phosphorus (10)
-                    dc(i, 10, 2) = dc(i, 10, 2) + OrgPHydr
-                    dc(i, 10, 2) = dc(i, 10, 2) + Rates%apa * PhytoResp
-                    dc(i, 10, 2) = dc(i, 10, 2) + Rates%apc / Rates%adc * HeteroResp !gp 15-Nov-04
-                    dc(i, 10, 2) = dc(i, 10, 2) - Rates%apc / Rates%adc * HeteroGrow !gp 15-Nov-04
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) + OrgPHydr
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) + Rates%apa * PhytoResp
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) + Rates%apc / Rates%adc * &
+                        HeteroResp !gp 15-Nov-04
+                    dc(i, IDX_SOLUBLE_REACTIVE_P, 2) = dc(i, IDX_SOLUBLE_REACTIVE_P, 2) - Rates%apc / Rates%adc * &
+                        HeteroGrow !gp 15-Nov-04
 
                     !'CBOD Slow (4)
-                    CBODsHydr = khcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 4, 2)
-                    dc(i, 4, 2) = dc(i, 4, 2) + Rates%roc * (1 / Rates%adc) * DetrDiss
-                    dc(i, 4, 2) = dc(i, 4, 2) - CBODsHydr
-                    CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 4, 2)
-                    dc(i, 4, 2) = dc(i, 4, 2) - CBODsOxid
+                    CBODsHydr = khcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_SLOW, 2)
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) + Rates%roc * (1 / Rates%adc) * DetrDiss
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) - CBODsHydr
+                    CBODsOxid = fcarb * kdcsT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_CBOD_SLOW, 2)
+                    dc(i, IDX_CBOD_SLOW, 2) = dc(i, IDX_CBOD_SLOW, 2) - CBODsOxid
 
                     !'CBOD Fast (5)
-                    CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 5, 2) !oxidation by suspended bacteria
-                    CBODfOxid = CBODfOxid + Rates%roc * (1 / Rates%adc) * HeteroGrow !enhanced CBOD oxidation from hyporheic biofilm growth
-                    dc(i, 5, 2) = dc(i, 5, 2) + CBODsHydr
-                    dc(i, 5, 2) = dc(i, 5, 2) - CBODfOxid
-                    dc(i, 5, 2) = dc(i, 5, 2) - Rates%rondn * Denitr
+                    CBODfOxid = fcarb * kdcT(i) * hydrau%reach(i)%HypoPoreVol * &
+                        c(i, IDX_CBOD_FAST, 2) !oxidation by suspended bacteria
+                    CBODfOxid = CBODfOxid + Rates%roc * (1 / Rates%adc) * &
+                        HeteroGrow !enhanced CBOD oxidation from hyporheic biofilm growth
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) + CBODsHydr
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) - CBODfOxid
+                    dc(i, IDX_CBOD_FAST, 2) = dc(i, IDX_CBOD_FAST, 2) - Rates%rondn * Denitr
 
                     !gp 08-Dec-04
                     !GENERIC CONSTITUENT or COD (14)
-                    dc(i, 14, 2) = dc(i, 14, 2) - kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 14, 2)
+                    dc(i, IDX_GENERIC_CONST, 2) = dc(i, IDX_GENERIC_CONST, 2) - kgenT(i) * &
+                        hydrau%reach(i)%HypoPoreVol * c(i, IDX_GENERIC_CONST, 2)
                     IF (Rates%useGenericAsCOD == "Yes") THEN
-                        CODoxid = kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 14, 2)
+                        CODoxid = kgenT(i) * hydrau%reach(i)%HypoPoreVol * c(i, IDX_GENERIC_CONST, 2)
                     ELSE
                         CODoxid = 0
                     END IF
 
                     !'Dissolved Oxygen (3)
-                    dc(i, 3, 2) = dc(i, 3, 2) - CBODsOxid - CBODfOxid !CBODfOxid includes oxidation by hyporheic biofilm
-                    dc(i, 3, 2) = dc(i, 3, 2) - Rates%ron * NH4Nitrif
-                    dc(i, 3, 2) = dc(i, 3, 2) - Rates%roa * PhytoResp
-                    dc(i, 3, 2) = dc(i, 3, 2) - Rates%roc / Rates%adc * HeteroResp !gp 15-Nov-04
-                    dc(i, 3, 2) = dc(i, 3, 2) - CODoxid !gp 08-Dec-04
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - CBODsOxid - &
+                        CBODfOxid !CBODfOxid includes oxidation by hyporheic biofilm
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - Rates%ron * NH4Nitrif
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - Rates%roa * PhytoResp
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - Rates%roc / Rates%adc * &
+                        HeteroResp !gp 15-Nov-04
+                    dc(i, IDX_DISSOLVED_OXYGEN, 2) = dc(i, IDX_DISSOLVED_OXYGEN, 2) - CODoxid !gp 08-Dec-04
 
                     !'Alkalinity (nv - 2)
 
                     If (sys%simAlk == "Yes") Then !gp 26-Oct-07
 
                         !gp 03-Dec-09
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkaa * PhytoResp * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkn * NH4Nitrif * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkden * Denitr * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * OrgNHydr * 50000 + Rates%ralkbp * OrgPHydr * 50000
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkda * HeteroGrow * prefamH * 50000 !gp 15-Nov-04
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkdn * HeteroGrow * (1 - prefamH) * 50000 !gp 15-Nov-04
-                        !dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkda * HeteroResp * 50000 !gp 15-Nov-04
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Fi * Rates%ana * PhytoResp * 50043.45_r64 !'phyto resp of N
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbp * Pcharge * Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbn * 2.0_r64 * NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss (Fi) and nitrate gain (+1)
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Denitr * 50043.45_r64 !'denitrification
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Fi * OrgNHydr * 50043.45_r64 !'organic N hydrolysis
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbp * Pcharge * OrgPHydr * 50043.45_r64 !'organic P hydrolysis
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbn * Rates%anc / Rates%adc * prefamH &
-                            * HeteroGrow * 50043.45_r64 !'hetero uptake of ammonia
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Rates%anc / Rates%adc * (1 - prefamH) &
-                            * HeteroGrow * 50043.45_r64 !'hetero uptake of nitrate
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbp * Pcharge * Rates%apc / Rates%adc &
-                            * HeteroGrow * 50043.45_r64 !'hetero uptake of SRP
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) + Rates%ralkbn * Fi * Rates%anc / Rates%adc &
-                            * HeteroResp * 50043.45_r64 !'hetero resp of ammonia
-                        dc(i, nv - 2, 2) = dc(i, nv - 2, 2) - Rates%ralkbp * Pcharge * Rates%apc / Rates%adc &
-                            * HeteroResp * 50043.45_r64 !'hetero resp of SRP
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkaa * PhytoResp * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkn * NH4Nitrif * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkden * Denitr * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * OrgNHydr * 50000 + Rates%ralkbp * OrgPHydr * 50000
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkda * HeteroGrow * prefamH * 50000 !gp 15-Nov-04
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkdn * HeteroGrow * (1 - prefamH) * 50000 !gp 15-Nov-04
+                        !dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkda * HeteroResp * 50000 !gp 15-Nov-04
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Fi * &
+                            Rates%ana * PhytoResp * 50043.45_r64 !'phyto resp of N
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbp * Pcharge * &
+                            Rates%apa * PhytoResp * 50043.45_r64 !'phyto resp of P
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbn * 2.0_r64 * &
+                            NH4Nitrif * 50043.45_r64 !'nitrification ammonia loss (Fi) and nitrate gain (+1)
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * &
+                            Denitr * 50043.45_r64 !'denitrification
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Fi * &
+                            OrgNHydr * 50043.45_r64 !'organic N hydrolysis
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbp * Pcharge * &
+                            OrgPHydr * 50043.45_r64 !'organic P hydrolysis
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbn * Rates%anc / Rates%adc * &
+                            prefamH * HeteroGrow * 50043.45_r64 !'hetero uptake of ammonia
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Rates%anc / Rates%adc * &
+                            (1 - prefamH) * HeteroGrow * 50043.45_r64 !'hetero uptake of nitrate
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbp * Pcharge * Rates%apc / &
+                            Rates%adc * HeteroGrow * 50043.45_r64 !'hetero uptake of SRP
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) + Rates%ralkbn * Fi * Rates%anc / &
+                            Rates%adc * HeteroResp * 50043.45_r64 !'hetero resp of ammonia
+                        dc(i, IDX_ALKALINITY, 2) = dc(i, IDX_ALKALINITY, 2) - Rates%ralkbp * Pcharge * Rates%apc / &
+                            Rates%adc * HeteroResp * 50043.45_r64 !'hetero resp of SRP
 
                     end if !gp 26-Oct-07
 
                     !'Inorganic Carbon (nv - 1)
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcca * PhytoResp
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcco * CBODfOxid
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rcco * CBODsOxid
-                    dc(i, nv - 1, 2) = dc(i, nv - 1, 2) + Rates%rccd * HeteroResp !gp 15-Nov-04
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcca * PhytoResp
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcco * CBODfOxid
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rcco * CBODsOxid
+                    dc(i, IDX_TOTAL_INORGANIC_C, 2) = dc(i, IDX_TOTAL_INORGANIC_C, 2) + Rates%rccd * HeteroResp !gp 15-Nov-04
 
                     !'PATHOGEN
-                    dc(i, 13, 2) = dc(i, 13, 2) - kpathT(i) * hydrau%reach(i)%HypoPoreVol * c(i, 13, 2)
+                    dc(i, IDX_PATHOGEN, 2) = dc(i, IDX_PATHOGEN, 2) - kpathT(i) * &
+                        hydrau%reach(i)%HypoPoreVol * c(i, IDX_PATHOGEN, 2)
 
                 END DO
 
@@ -1719,7 +1825,7 @@ contains
                     DO k = 1, nv - 1
                         dc(i, k, 2) = dc(i, k, 2) / hydrau%reach(i)%HypoPoreVol
                     END DO
-                    dc(i, nv, 2) = dc(i, nv, 2) / hydrau%reach(i)%Ast !gp 15-Nov-04
+                    dc(i, IDX_HYPORHEIC_BIOFILM, 2) = dc(i, IDX_HYPORHEIC_BIOFILM, 2) / hydrau%reach(i)%Ast !gp 15-Nov-04
                 END DO
 
 
